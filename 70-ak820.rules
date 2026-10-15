@@ -1,0 +1,3 @@
+# AJAZZ AK820 Pro: let the logged-in user open its hidraw nodes (used by ak820.py)
+KERNEL=="hidraw*", ATTRS{idVendor}=="0c45", ATTRS{idProduct}=="8009", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="0c45", ATTRS{idProduct}=="800a", TAG+="uaccess"

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AJAZZ AK820 Pro
+Comment=RGB lighting and screen for the AJAZZ AK820 Pro keyboard
+Exec=/usr/bin/python3 @DEST@/ak820_gui.py
+Icon=@DEST@/ak820.png
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=keyboard;rgb;ajazz;ak820;
+StartupWMClass=ak820
