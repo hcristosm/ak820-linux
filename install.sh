@@ -23,6 +23,8 @@ cp "$SRC/ak820.py" "$SRC/ak820_gui.py" "$SRC/ak820.png" "$DEST/"
 ln -sf "$DEST/ak820.py" "$HOME/.local/bin/ak820"
 ln -sf "$DEST/ak820_gui.py" "$HOME/.local/bin/ak820-gui"
 sed "s|@DEST@|$DEST|g" "$SRC/ak820.desktop" > "$APPS/ak820.desktop"
+# KDE caches menu entries and may keep launching an old Exec path until the cache is rebuilt
+for c in kbuildsycoca6 kbuildsycoca5; do command -v $c >/dev/null && $c >/dev/null 2>&1 && break; done || true
 
 if ! cmp -s "$SRC/70-ak820.rules" "$RULE"; then
     sudo install -m 644 "$SRC/70-ak820.rules" "$RULE"
