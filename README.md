@@ -7,7 +7,7 @@ without the vendor's Windows-only software.
 - per-key static colors
 - upload an image or animated GIF (up to 140 frames) to the screen
 - sync the screen clock to your PC
-- command line tool and a small GUI
+- command line tool and a small GUI with saved profiles
 
 Unofficial project. Not affiliated with or endorsed by AJAZZ.
 
@@ -49,7 +49,9 @@ You can also run `./ak820.py` or `./ak820_gui.py` straight from the cloned folde
 
 ## Usage
 
-GUI: open **AJAZZ AK820 Pro** from the app menu, or run `ak820-gui`.
+GUI: open **AJAZZ AK820 Pro** from the app menu, or run `ak820-gui`. It remembers your settings between runs and lets you
+save named profiles (Load applies the profile's lighting; the screen image is remembered but not re-sent).
+Settings live in `~/.config/ak820/config.json`.
 
 Command line:
 

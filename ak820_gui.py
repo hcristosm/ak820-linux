@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tk GUI for ak820.py: effects, per-key colors, screen image and clock."""
-import os, queue, threading, tkinter as tk
-from tkinter import colorchooser, filedialog, ttk
+import json, os, queue, sys, threading, tkinter as tk
+from tkinter import colorchooser, filedialog, messagebox, ttk
 
 import ak820
 
@@ -14,16 +14,44 @@ LABEL = dict(grave="`", minus="-", equal="=", lbracket="[", rbracket="]", backsl
              backspace="Back", capslock="Caps", lshift="Shift", rshift="Shift", lctrl="Ctrl",
              rctrl="Ctrl", lalt="Alt", ralt="Alt", delete="Del", pgup="PgUp", pgdn="PgDn")
 U, GAP = 40, 3  # pixels per key unit, gap between keys
+CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "ak820", "config.json")
 
 
 def hexs(rgb):
     return "#%02x%02x%02x" % rgb
 
 
+def load_config(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except OSError:
+        return {}
+    except ValueError:  # keep a broken file aside instead of overwriting the user's profiles
+        os.replace(path, path + ".bad")
+        return {}
+
+
+def save_config(cfg, path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "w") as f:
+        json.dump(cfg, f, indent=1)
+    os.replace(path + ".tmp", path)  # never leave a half-written config
+
+
 class App:
-    def __init__(self, root):
+    def __init__(self, root, cfg_path=CONFIG):
         self.root, self.jobs, self.busy = root, queue.Queue(), False
+        self.cfg_path, self.cfg, self.lighting = cfg_path, load_config(cfg_path), "effect"
+        self.cfg.setdefault("profiles", {})
         root.title(f"AJAZZ AK820 Pro {ak820.__version__}")
+        bar = ttk.Frame(root)
+        bar.pack(fill="x", padx=8, pady=(8, 0))
+        ttk.Label(bar, text="Profile").pack(side="left")
+        self.profile = ttk.Combobox(bar, width=20)
+        self.profile.pack(side="left", padx=6)
+        for txt, cmd in (("Load", self.load_profile), ("Save", self.save_profile), ("Delete", self.delete_profile)):
+            ttk.Button(bar, text=txt, command=cmd).pack(side="left", padx=2)
         nb = ttk.Notebook(root)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
         for title, build in (("Effects", self.tab_effects), ("Per-key colors", self.tab_keys),
@@ -35,7 +63,71 @@ class App:
         self.bar = ttk.Progressbar(root, maximum=100)
         self.bar.pack(fill="x", padx=8)
         ttk.Label(root, textvariable=self.status).pack(anchor="w", padx=8, pady=(2, 8))
+        self.profile["values"] = sorted(self.cfg["profiles"])
+        if "last" in self.cfg:
+            self.set_state(self.cfg["last"])
+        root.protocol("WM_DELETE_WINDOW", self.quit)
         root.after(100, self.poll)
+
+    # --- settings: "last" is restored on start, profiles are named snapshots of the same state ---
+    def get_state(self):
+        return dict(mode=self.mode_id(), rainbow=self.rainbow.get(), color=hexs(self.color),
+                    brightness=self.bright.get(), speed=self.speed.get(), direction=self.direction.get(),
+                    keys={n: hexs(c) for n, c in self.key_colors.items()}, key_brightness=self.key_bright.get(),
+                    lighting=self.lighting, image=self.image_path, fit=self.fit.get())
+
+    def set_state(self, st):
+        self.mode.current(st.get("mode", 11))  # combobox index == mode id
+        self.rainbow.set(st.get("rainbow", True))
+        self.color = ak820.hexrgb(st.get("color", "#ff0000"))
+        self.color_btn.configure(bg=hexs(self.color))
+        self.bright.set(st.get("brightness", 5))
+        self.speed.set(st.get("speed", 3))
+        self.direction.set(st.get("direction", 0))
+        self.key_bright.set(st.get("key_brightness", 5))
+        for n, c in st.get("keys", {}).items():
+            if n in self.rects:
+                self.paint_key(n, ak820.hexrgb(c))
+        self.lighting = st.get("lighting", "effect")
+        self.fit.set(st.get("fit", "crop"))
+        img = st.get("image")
+        self.image_path = img if img and os.path.exists(img) else None
+        self.show_preview()
+        self.update_effect_controls()
+
+    def persist(self):
+        self.cfg["last"] = self.get_state()
+        save_config(self.cfg, self.cfg_path)
+
+    def quit(self):
+        try:
+            self.persist()
+        finally:
+            self.root.destroy()
+
+    def save_profile(self):
+        name = self.profile.get().strip()
+        if not name:
+            return self.status.set("Type a profile name first.")
+        self.cfg["profiles"][name] = self.get_state()
+        self.persist()
+        self.profile["values"] = sorted(self.cfg["profiles"])
+        self.status.set(f"Profile '{name}' saved.")
+
+    def load_profile(self):
+        st = self.cfg["profiles"].get(self.profile.get())
+        if not st:
+            return self.status.set("Pick a saved profile.")
+        self.set_state(st)
+        (self.apply_keys if self.lighting == "keys" else self.apply_effect)()  # screen is not re-sent (slow)
+
+    def delete_profile(self):
+        name = self.profile.get()
+        if name in self.cfg["profiles"] and messagebox.askyesno("Delete profile", f"Delete profile '{name}'?"):
+            del self.cfg["profiles"][name]
+            self.persist()
+            self.profile["values"] = sorted(self.cfg["profiles"])
+            self.profile.set("")
 
     # --- device work runs in a thread; UI updates go through self.jobs ---
     def run(self, label, fn):
@@ -131,6 +223,7 @@ class App:
         mode, flags = self.mode_id(), ak820.MODES[self.mode_id()][1]
         rgb = None if (flags & 0x20 and self.rainbow.get()) or not flags & 0x10 else self.color
         args = (mode, rgb, self.bright.get(), self.speed.get(), self.direction.get())
+        self.lighting = "effect"
         self.run("Effect " + ak820.MODES[mode][0], lambda kb: kb.set_mode(*args))
 
     # --- Per-key colors ---
@@ -173,11 +266,12 @@ class App:
             self.paint = tuple(int(x) for x in c)
             self.paint_btn.configure(bg=hexs(self.paint))
 
-    def paint_key(self, name):
-        self.key_colors[name] = self.paint
+    def paint_key(self, name, color=None):
+        color = color or self.paint
+        self.key_colors[name] = color
         r, t = self.rects[name]
-        self.canvas.itemconfigure(r, fill=hexs(self.paint))
-        self.canvas.itemconfigure(t, fill="black" if sum(self.paint) > 380 else "white")
+        self.canvas.itemconfigure(r, fill=hexs(color))
+        self.canvas.itemconfigure(t, fill="black" if sum(color) > 380 else "white")
 
     def paint_all(self):
         for name in self.key_colors:
@@ -186,6 +280,7 @@ class App:
     def apply_keys(self):
         colors = {ak820.KEYS[n]: c for n, c in self.key_colors.items()}
         b = self.key_bright.get()
+        self.lighting = "keys"
         self.run("Per-key colors", lambda kb: kb.set_keys(colors, b))
 
     # --- Screen ---
@@ -214,7 +309,8 @@ class App:
 
     def show_preview(self):
         if not self.image_path:
-            return
+            self.preview_lbl.configure(image="")
+            return self.image_lbl.configure(text="No file selected")
         from PIL import Image, ImageOps, ImageTk
         im = Image.open(self.image_path)
         n = getattr(im, "n_frames", 1)
@@ -242,7 +338,25 @@ class App:
                    ).pack(anchor="w", pady=10)
 
 
+def selftest():
+    """Settings survive close + reopen (uses a temp config, no keyboard needed)."""
+    import tempfile
+    path = os.path.join(tempfile.mkdtemp(), "config.json")
+    a = App(tk.Tk(), path)
+    a.mode.current(10); a.rainbow.set(False); a.color = (1, 2, 3); a.direction.set(1)
+    a.paint = (9, 8, 7); a.paint_key("w"); a.lighting = "keys"
+    a.profile.set("night"); a.save_profile()
+    st = a.get_state()
+    a.quit()
+    b = App(tk.Tk(), path)
+    assert b.get_state() == st and b.cfg["profiles"]["night"] == st, (b.get_state(), st)
+    b.root.destroy()
+    print("gui selftest ok")
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["selftest"]:
+        sys.exit(selftest())
     root = tk.Tk(className="ak820")  # matches StartupWMClass in ak820.desktop
     root.iconphoto(True, tk.PhotoImage(file=os.path.join(os.path.dirname(os.path.realpath(__file__)), "ak820.png")))
     App(root)
