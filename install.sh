@@ -13,7 +13,7 @@ if [ "$1" = "--uninstall" ]; then
     exit 0
 fi
 
-python3 -c "import PIL, PySide6" 2>/dev/null || {
+python3 -c "import PIL, PySide6.QtWidgets" 2>/dev/null || {
     echo "Missing dependencies. Fedora: sudo dnf install python3-pyside6 python3-pillow"
     echo "                      Debian/Ubuntu: sudo apt install python3-pyside6.qtwidgets python3-pil"
     echo "                      elsewhere: pip install --user PySide6 pillow"

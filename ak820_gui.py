@@ -59,6 +59,8 @@ QCheckBox::indicator, QRadioButton::indicator {{ width: 16px; height: 16px; bord
 QCheckBox::indicator {{ border-radius: 4px; }}
 QRadioButton::indicator {{ border-radius: 8px; }}
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
+QCheckBox::indicator:disabled {{ border-color: {LINE}; }}
+QCheckBox::indicator:checked:disabled {{ background: {MUTED}; border-color: {MUTED}; }}
 QCheckBox:disabled, QRadioButton:disabled, QLabel:disabled {{ color: {MUTED}; }}
 QStatusBar {{ background: {SURFACE}; color: {MUTED}; }}
 QProgressBar {{ background: {LINE}; border: none; border-radius: 4px; max-height: 8px; min-width: 160px; }}
@@ -73,12 +75,15 @@ def hexs(rgb):
 def load_config(path):
     try:
         with open(path) as f:
-            return json.load(f)
+            cfg = json.load(f)
     except OSError:
         return {}
-    except ValueError:  # keep a broken file aside instead of overwriting the user's profiles
-        os.replace(path, path + ".bad")
-        return {}
+    except ValueError:
+        cfg = None
+    if isinstance(cfg, dict):
+        return cfg
+    os.replace(path, path + ".bad")  # keep a broken file aside instead of overwriting the user's profiles
+    return {}
 
 
 def save_config(cfg, path):
@@ -121,6 +126,8 @@ class App(QMainWindow):
     def __init__(self, cfg_path=CONFIG):
         super().__init__()
         app = QApplication.instance()
+        app.setApplicationName("ak820")  # X11 WM_CLASS; must match StartupWMClass in ak820.desktop
+        app.setDesktopFileName("ak820")  # Wayland app_id, same purpose
         app.setStyle("Fusion")  # same look on every desktop; QSS does the rest
         app.setStyleSheet(QSS)
         pal = app.palette()  # Fusion draws the combobox arrow with these
@@ -129,7 +136,8 @@ class App(QMainWindow):
         app.setPalette(pal)
         self.busy, self.lighting = False, "effect"
         self.cfg_path, self.cfg = cfg_path, load_config(cfg_path)
-        self.cfg.setdefault("profiles", {})
+        if not isinstance(self.cfg.get("profiles"), dict):
+            self.cfg["profiles"] = {}
         self.setWindowTitle(f"AJAZZ AK820 Pro {ak820.__version__}")
 
         side = QFrame(objectName="side")
@@ -173,7 +181,10 @@ class App(QMainWindow):
         self.say("Ready.")
         self.refresh_profiles()
         if "last" in self.cfg:
-            self.set_state(self.cfg["last"])
+            try:
+                self.set_state(self.cfg["last"])
+            except Exception as e:  # a bad hand-edited value must not stop the app from opening
+                self.say(f"Ignored saved settings: {e}")
 
     def page(self, title, fill, action, slot):
         w = QWidget()
@@ -500,6 +511,21 @@ def selftest():
     c = App(path)
     assert os.path.exists(path + ".bad") and c.cfg["profiles"] == {}
     c.close()
+    # bad values in the saved state are skipped instead of stopping the app from opening
+    save_config(dict(profiles={}, last=dict(color="red", mode=None)), path)
+    c = App(path)
+    assert c.statusBar().currentMessage().startswith("Ignored saved settings"), c.statusBar().currentMessage()
+    c.close()
+    # valid JSON of the wrong shape is kept aside like a broken file
+    with open(path, "w") as f:
+        f.write("[]")
+    c = App(path)
+    assert c.cfg["profiles"] == {}
+    c.close()
+    save_config(dict(profiles=None), path)
+    App(path).close()
+    # X11 WM_CLASS comes from the application name; must match StartupWMClass in ak820.desktop
+    assert app.applicationName() == "ak820", app.applicationName()
     print("gui selftest ok")
 
 
@@ -507,7 +533,6 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["selftest"]:
         sys.exit(selftest())
     app = QApplication(sys.argv)
-    app.setDesktopFileName("ak820")  # matches StartupWMClass in ak820.desktop
     app.setWindowIcon(QIcon(os.path.join(os.path.dirname(os.path.realpath(__file__)), "ak820.png")))
     w = App()
     w.show()
