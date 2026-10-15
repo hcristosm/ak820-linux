@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-"""Tk GUI for ak820.py: effects, per-key colors, screen image and clock."""
-import json, os, queue, sys, threading, tkinter as tk
-from tkinter import colorchooser, filedialog, messagebox, ttk
+"""Qt GUI for ak820.py: effects, per-key colors, screen image and clock."""
+import json, os, sys, threading
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QImage, QPalette, QPixmap
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QFileDialog,
+                               QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox,
+                               QProgressBar, QPushButton, QRadioButton, QSlider, QStackedWidget, QVBoxLayout,
+                               QWidget)
 
 import ak820
 
@@ -13,8 +19,51 @@ LABEL = dict(grave="`", minus="-", equal="=", lbracket="[", rbracket="]", backsl
              quote="'", comma=",", period=".", slash="/", up="↑", down="↓", left="←", right="→",
              backspace="Back", capslock="Caps", lshift="Shift", rshift="Shift", lctrl="Ctrl",
              rctrl="Ctrl", lalt="Alt", ralt="Alt", delete="Del", pgup="PgUp", pgdn="PgDn")
-U, GAP = 40, 3  # pixels per key unit, gap between keys
+U, GAP, PAD = 40, 3, 12  # pixels per key unit, gap between keys, keyboard card padding
+FITS = ("crop", "pad")
 CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "ak820", "config.json")
+
+BG, SURFACE, FG, ACCENT = "#16181d", "#1f2229", "#e6e6e6", "#22d3ee"
+HOVER, LINE, MUTED = "#2a2e37", "#2e323b", "#8a8f98"
+QSS = f"""
+QWidget {{ background: {BG}; color: {FG}; font-size: 10pt; }}
+QLabel, QCheckBox, QRadioButton, QSlider {{ background: transparent; }}
+QLabel#title {{ font-size: 18pt; font-weight: bold; }}
+QLabel#brand {{ font-size: 14pt; font-weight: bold; color: {ACCENT}; padding: 4px 8px 12px; }}
+QLabel#muted {{ color: {MUTED}; }}
+QLabel#preview {{ background: black; border-radius: 12px; }}
+QFrame#side, QFrame#card {{ background: {SURFACE}; }}
+QFrame#card {{ border-radius: 12px; }}
+QListWidget {{ background: transparent; border: none; outline: 0; font-size: 11pt; }}
+QListWidget::item {{ padding: 10px; border-radius: 8px; }}
+QListWidget::item:hover {{ background: {HOVER}; }}
+QListWidget::item:selected {{ background: {BG}; color: {ACCENT}; }}
+QPushButton {{ background: {HOVER}; border: 1px solid {LINE}; border-radius: 8px; padding: 6px 14px; }}
+QPushButton:hover {{ border-color: {ACCENT}; }}
+QPushButton:checked {{ background: {BG}; border: 2px solid {ACCENT}; color: {ACCENT}; }}
+QPushButton:disabled {{ color: {MUTED}; border-color: {SURFACE}; }}
+QPushButton#accent {{ background: {ACCENT}; color: {BG}; border: none; font-weight: bold; padding: 8px 22px; }}
+QPushButton#accent:hover {{ background: #67e8f9; }}
+QPushButton#mode {{ min-height: 44px; }}
+QPushButton#key {{ padding: 0; border-radius: 6px; font-size: 8pt; }}
+QPushButton#swatch {{ min-width: 44px; max-width: 44px; min-height: 26px; max-height: 26px; padding: 0; }}
+QFrame#side QPushButton {{ padding: 6px 4px; }}
+QComboBox {{ background: {BG}; border: 1px solid {LINE}; border-radius: 8px; padding: 5px 8px; }}
+QComboBox QAbstractItemView {{ background: {SURFACE}; selection-background-color: {ACCENT}; selection-color: {BG}; }}
+QSlider::groove:horizontal {{ height: 6px; background: {LINE}; border-radius: 3px; }}
+QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 3px; }}
+QSlider::sub-page:horizontal:disabled {{ background: {LINE}; }}
+QSlider::handle:horizontal {{ background: {FG}; width: 16px; margin: -5px 0; border-radius: 8px; }}
+QSlider::handle:horizontal:disabled {{ background: {MUTED}; }}
+QCheckBox::indicator, QRadioButton::indicator {{ width: 16px; height: 16px; border: 1px solid {MUTED}; background: {BG}; }}
+QCheckBox::indicator {{ border-radius: 4px; }}
+QRadioButton::indicator {{ border-radius: 8px; }}
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
+QCheckBox:disabled, QRadioButton:disabled, QLabel:disabled {{ color: {MUTED}; }}
+QStatusBar {{ background: {SURFACE}; color: {MUTED}; }}
+QProgressBar {{ background: {LINE}; border: none; border-radius: 4px; max-height: 8px; min-width: 160px; }}
+QProgressBar::chunk {{ background: {ACCENT}; border-radius: 4px; }}
+"""
 
 
 def hexs(rgb):
@@ -39,57 +88,130 @@ def save_config(cfg, path):
     os.replace(path + ".tmp", path)  # never leave a half-written config
 
 
-class App:
-    def __init__(self, root, cfg_path=CONFIG):
-        self.root, self.jobs, self.busy = root, queue.Queue(), False
-        self.cfg_path, self.cfg, self.lighting = cfg_path, load_config(cfg_path), "effect"
+def hbox(*widgets):
+    h = QHBoxLayout()
+    h.setContentsMargins(0, 0, 0, 0)
+    for w in widgets:
+        h.addWidget(w)
+    h.addStretch()
+    return h
+
+
+def card(layout):
+    f = QFrame(objectName="card")
+    layout.addWidget(f)
+    return f
+
+
+def slider(value):
+    s = QSlider(Qt.Horizontal, minimum=0, maximum=5, value=value)
+    s.setFixedWidth(240)
+    n = QLabel(str(value))
+    s.valueChanged.connect(n.setNum)
+    return s, n
+
+
+def swatch(btn, rgb):
+    btn.setStyleSheet(f"QPushButton {{ background: {hexs(rgb)}; }} QPushButton:disabled {{ background: {LINE}; }}")
+
+
+class App(QMainWindow):
+    done, progress = Signal(str), Signal(int)  # worker thread -> UI
+
+    def __init__(self, cfg_path=CONFIG):
+        super().__init__()
+        app = QApplication.instance()
+        app.setStyle("Fusion")  # same look on every desktop; QSS does the rest
+        app.setStyleSheet(QSS)
+        pal = app.palette()  # Fusion draws the combobox arrow with these
+        pal.setColor(QPalette.Button, QColor(BG))
+        pal.setColor(QPalette.ButtonText, QColor(FG))
+        app.setPalette(pal)
+        self.busy, self.lighting = False, "effect"
+        self.cfg_path, self.cfg = cfg_path, load_config(cfg_path)
         self.cfg.setdefault("profiles", {})
-        root.title(f"AJAZZ AK820 Pro {ak820.__version__}")
-        bar = ttk.Frame(root)
-        bar.pack(fill="x", padx=8, pady=(8, 0))
-        ttk.Label(bar, text="Profile").pack(side="left")
-        self.profile = ttk.Combobox(bar, width=20)
-        self.profile.pack(side="left", padx=6)
-        for txt, cmd in (("Load", self.load_profile), ("Save", self.save_profile), ("Delete", self.delete_profile)):
-            ttk.Button(bar, text=txt, command=cmd).pack(side="left", padx=2)
-        nb = ttk.Notebook(root)
-        nb.pack(fill="both", expand=True, padx=8, pady=8)
-        for title, build in (("Effects", self.tab_effects), ("Per-key colors", self.tab_keys),
-                             ("Screen", self.tab_screen), ("Clock", self.tab_clock)):
-            f = ttk.Frame(nb, padding=10)
-            build(f)
-            nb.add(f, text=title)
-        self.status = tk.StringVar(value="Ready.")
-        self.bar = ttk.Progressbar(root, maximum=100)
-        self.bar.pack(fill="x", padx=8)
-        ttk.Label(root, textvariable=self.status).pack(anchor="w", padx=8, pady=(2, 8))
-        self.profile["values"] = sorted(self.cfg["profiles"])
+        self.setWindowTitle(f"AJAZZ AK820 Pro {ak820.__version__}")
+
+        side = QFrame(objectName="side")
+        side.setFixedWidth(200)
+        sv = QVBoxLayout(side)
+        sv.addWidget(QLabel("◆ AK820 Pro", objectName="brand"))
+        self.nav, self.stack = QListWidget(), QStackedWidget()
+        sv.addWidget(self.nav)
+        for nav, title, fill, action, slot in (
+                ("✦  Effects", "Effects", self.fill_effects, "Apply", self.apply_effect),
+                ("⌨  Per-key colors", "Per-key colors", self.fill_keys, "Apply", self.apply_keys),
+                ("▣  Screen", "Screen", self.fill_screen, "Send to screen", self.apply_screen),
+                ("◷  Clock", "Clock", self.fill_clock, "Sync now", self.sync_clock)):
+            self.nav.addItem(nav)
+            self.stack.addWidget(self.page(title, fill, action, slot))
+        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.nav.setCurrentRow(0)
+        sv.addWidget(QLabel("Profile", objectName="muted"))
+        self.profile = QComboBox(editable=True)
+        self.profile.lineEdit().setPlaceholderText("name")
+        sv.addWidget(self.profile)
+        row = QHBoxLayout()
+        for txt, slot in (("Load", self.load_profile), ("Save", self.save_profile), ("Delete", self.delete_profile)):
+            b = QPushButton(txt)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+        sv.addLayout(row)
+
+        body = QWidget()
+        h = QHBoxLayout(body)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+        h.addWidget(side)
+        h.addWidget(self.stack, 1)
+        self.setCentralWidget(body)
+
+        self.bar = QProgressBar(textVisible=False)
+        self.statusBar().addPermanentWidget(self.bar)
+        self.done.connect(self.finish)
+        self.progress.connect(self.bar.setValue)
+        self.say("Ready.")
+        self.refresh_profiles()
         if "last" in self.cfg:
             self.set_state(self.cfg["last"])
-        root.protocol("WM_DELETE_WINDOW", self.quit)
-        root.after(100, self.poll)
+
+    def page(self, title, fill, action, slot):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(28, 24, 28, 24)
+        v.setSpacing(14)
+        v.addWidget(QLabel(title, objectName="title"))
+        fill(v)
+        v.addStretch()
+        b = QPushButton(action, objectName="accent")
+        b.clicked.connect(slot)
+        v.addWidget(b, alignment=Qt.AlignRight)
+        return w
+
+    def say(self, msg):
+        self.statusBar().showMessage(msg)
 
     # --- settings: "last" is restored on start, profiles are named snapshots of the same state ---
     def get_state(self):
-        return dict(mode=self.mode_id(), rainbow=self.rainbow.get(), color=hexs(self.color),
-                    brightness=self.bright.get(), speed=self.speed.get(), direction=self.direction.get(),
-                    keys={n: hexs(c) for n, c in self.key_colors.items()}, key_brightness=self.key_bright.get(),
-                    lighting=self.lighting, image=self.image_path, fit=self.fit.get())
+        return dict(mode=self.mode_id(), rainbow=self.rainbow.isChecked(), color=hexs(self.color),
+                    brightness=self.bright.value(), speed=self.speed.value(), direction=self.dir_group.checkedId(),
+                    keys={n: hexs(c) for n, c in self.key_colors.items()}, key_brightness=self.key_bright.value(),
+                    lighting=self.lighting, image=self.image_path, fit=self.fit())
 
     def set_state(self, st):
-        self.mode.current(st.get("mode", 11))  # combobox index == mode id
-        self.rainbow.set(st.get("rainbow", True))
+        (self.modes.button(st.get("mode", 11)) or self.modes.button(11)).setChecked(True)
+        self.rainbow.setChecked(st.get("rainbow", True))
         self.color = ak820.hexrgb(st.get("color", "#ff0000"))
-        self.color_btn.configure(bg=hexs(self.color))
-        self.bright.set(st.get("brightness", 5))
-        self.speed.set(st.get("speed", 3))
-        self.direction.set(st.get("direction", 0))
-        self.key_bright.set(st.get("key_brightness", 5))
+        swatch(self.color_btn, self.color)
+        self.bright.setValue(st.get("brightness", 5))
+        self.speed.setValue(st.get("speed", 3))
+        self.dir_group.button(1 if st.get("direction") == 1 else 0).setChecked(True)
+        self.key_bright.setValue(st.get("key_brightness", 5))
         for n, c in st.get("keys", {}).items():
-            if n in self.rects:
+            if n in self.keys:
                 self.paint_key(n, ak820.hexrgb(c))
         self.lighting = st.get("lighting", "effect")
-        self.fit.set(st.get("fit", "crop"))
+        self.fit_group.button(FITS.index(st["fit"]) if st.get("fit") in FITS else 0).setChecked(True)
         img = st.get("image")
         self.image_path = img if img and os.path.exists(img) else None
         self.show_preview()
@@ -99,43 +221,50 @@ class App:
         self.cfg["last"] = self.get_state()
         save_config(self.cfg, self.cfg_path)
 
-    def quit(self):
-        try:
-            self.persist()
-        finally:
-            self.root.destroy()
+    def closeEvent(self, e):
+        self.persist()
+        super().closeEvent(e)
+
+    def refresh_profiles(self, name=""):
+        self.profile.clear()
+        self.profile.addItems(sorted(self.cfg["profiles"]))
+        self.profile.setCurrentText(name)
 
     def save_profile(self):
-        name = self.profile.get().strip()
+        name = self.profile.currentText().strip()
         if not name:
-            return self.status.set("Type a profile name first.")
+            return self.say("Type a profile name first.")
         self.cfg["profiles"][name] = self.get_state()
         self.persist()
-        self.profile["values"] = sorted(self.cfg["profiles"])
-        self.status.set(f"Profile '{name}' saved.")
+        self.refresh_profiles(name)
+        self.say(f"Profile '{name}' saved.")
 
     def load_profile(self):
-        st = self.cfg["profiles"].get(self.profile.get())
+        st = self.cfg["profiles"].get(self.profile.currentText())
         if not st:
-            return self.status.set("Pick a saved profile.")
+            return self.say("Pick a saved profile.")
         self.set_state(st)
         (self.apply_keys if self.lighting == "keys" else self.apply_effect)()  # screen is not re-sent (slow)
 
     def delete_profile(self):
-        name = self.profile.get()
-        if name in self.cfg["profiles"] and messagebox.askyesno("Delete profile", f"Delete profile '{name}'?"):
+        name = self.profile.currentText()
+        if name in self.cfg["profiles"] and QMessageBox.question(
+                self, "Delete profile", f"Delete profile '{name}'?") == QMessageBox.Yes:
             del self.cfg["profiles"][name]
             self.persist()
-            self.profile["values"] = sorted(self.cfg["profiles"])
-            self.profile.set("")
+            self.refresh_profiles()
 
-    # --- device work runs in a thread; UI updates go through self.jobs ---
+    def pick_color(self, rgb, title):
+        c = QColorDialog.getColor(QColor(*rgb), self, title)
+        return c.getRgb()[:3] if c.isValid() else None
+
+    # --- device work runs in a thread; results come back through the done/progress signals ---
     def run(self, label, fn):
         if self.busy:
             return
         self.busy = True
-        self.status.set(label + "…")
-        self.bar["value"] = 0
+        self.say(label + "…")
+        self.bar.setValue(0)
 
         def work():
             try:
@@ -146,218 +275,240 @@ class App:
                     os.close(kb.fd)
                     kb.lcd is not None and os.close(kb.lcd)
                 msg = label + ": done."
-            except SystemExit as e:  # find_hidraw exits with a message when the keyboard is missing
+            except (SystemExit, Exception) as e:  # find_hidraw exits with a message when the keyboard is missing
                 msg = f"Error: {e}"
-            except Exception as e:
-                msg = f"Error: {e}"
-            self.jobs.put(("done", msg))
+            self.done.emit(msg)
 
         threading.Thread(target=work, daemon=True).start()
 
-    def poll(self):
-        while not self.jobs.empty():
-            kind, val = self.jobs.get()
-            if kind == "progress":
-                self.bar["value"] = val
-            else:
-                self.busy = False
-                self.bar["value"] = 100
-                self.status.set(val)
-        self.root.after(100, self.poll)
+    def finish(self, msg):
+        self.busy = False
+        self.bar.setValue(100)
+        self.say(msg)
 
     # --- Effects ---
-    def tab_effects(self, f):
-        names = [f"{i:2d}  {n}" for i, (n, _) in ak820.MODES.items()]
-        self.mode = ttk.Combobox(f, values=names, state="readonly", width=24)
-        self.mode.current(11)  # vendor default_mode="11"
-        self.mode.bind("<<ComboboxSelected>>", lambda e: self.update_effect_controls())
-        self.rainbow = tk.BooleanVar(value=True)
-        self.color = (255, 0, 0)
-        self.bright, self.speed, self.direction = tk.IntVar(value=5), tk.IntVar(value=3), tk.IntVar(value=0)
+    def fill_effects(self, v):
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        v.addLayout(grid)
+        self.modes = QButtonGroup(self)
+        for i, (name, _) in ak820.MODES.items():
+            b = QPushButton(name.title(), objectName="mode", checkable=True)
+            self.modes.addButton(b, i)
+            grid.addWidget(b, i // 5, i % 5)
+        self.modes.button(11).setChecked(True)  # vendor default_mode="11"
+        self.modes.buttonClicked.connect(lambda _: self.update_effect_controls())
 
-        ttk.Label(f, text="Effect").grid(row=0, column=0, sticky="w")
-        self.mode.grid(row=0, column=1, sticky="w", pady=4)
-        self.rainbow_cb = ttk.Checkbutton(f, text="Rainbow", variable=self.rainbow,
-                                          command=self.update_effect_controls)
-        self.rainbow_cb.grid(row=1, column=1, sticky="w")
-        ttk.Label(f, text="Color").grid(row=2, column=0, sticky="w")
-        self.color_btn = tk.Button(f, width=6, bg=hexs(self.color), command=self.pick_effect_color)
-        self.color_btn.grid(row=2, column=1, sticky="w", pady=4)
-        self.scales = {}
-        for r, (txt, var) in enumerate((("Brightness", self.bright), ("Speed", self.speed)), start=3):
-            ttk.Label(f, text=txt).grid(row=r, column=0, sticky="w")
-            s = tk.Scale(f, from_=0, to=5, orient="horizontal", variable=var, length=200)
-            s.grid(row=r, column=1, sticky="w")
-            self.scales[txt] = s
-        ttk.Label(f, text="Direction").grid(row=5, column=0, sticky="w")
-        d = ttk.Frame(f)
-        d.grid(row=5, column=1, sticky="w", pady=4)
-        self.dir_rbs = [ttk.Radiobutton(d, text=t, value=v, variable=self.direction)
-                        for v, t in ((0, "→ / ↓"), (1, "← / ↑"))]
-        for rb in self.dir_rbs:
-            rb.pack(side="left", padx=(0, 10))
-        ttk.Button(f, text="Apply", command=self.apply_effect).grid(row=6, column=1, sticky="w", pady=10)
+        self.color = (255, 0, 0)
+        self.color_btn = QPushButton(objectName="swatch")
+        swatch(self.color_btn, self.color)
+        self.color_btn.clicked.connect(self.pick_effect_color)
+        self.rainbow = QCheckBox("Rainbow", checked=True)
+        self.rainbow.toggled.connect(lambda _: self.update_effect_controls())
+        self.bright, bn = slider(5)
+        self.speed, sn = slider(3)
+        self.dir_group = QButtonGroup(self)
+        for i, t in enumerate(("→ / ↓", "← / ↑")):
+            self.dir_group.addButton(QPushButton(t, checkable=True), i)
+        self.dir_group.button(0).setChecked(True)
+
+        form = QGridLayout(card(v))
+        form.setContentsMargins(18, 16, 18, 16)
+        form.setVerticalSpacing(12)
+        for r, (txt, row) in enumerate((("Color", hbox(self.color_btn, self.rainbow)),
+                                        ("Brightness", hbox(self.bright, bn)), ("Speed", hbox(self.speed, sn)),
+                                        ("Direction", hbox(*self.dir_group.buttons())))):
+            form.addWidget(QLabel(txt), r, 0)
+            form.addLayout(row, r, 1)
         self.update_effect_controls()
 
     def mode_id(self):
-        return int(self.mode.get().split()[0])
+        return self.modes.checkedId()
 
     def update_effect_controls(self):
         flags = ak820.MODES[self.mode_id()][1]
-        on = lambda bit: "normal" if flags & bit else "disabled"
-        self.rainbow_cb.configure(state=on(0x20))
-        has_color = flags & 0x10 and not (flags & 0x20 and self.rainbow.get())
-        self.color_btn.configure(state="normal" if has_color else "disabled")
-        self.scales["Brightness"].configure(state=on(0x01))
-        self.scales["Speed"].configure(state=on(0x02))
-        for rb in self.dir_rbs:
-            rb.configure(state=on(0x0C))  # 0x04 horizontal, 0x08 vertical (Scrolling)
+        self.rainbow.setEnabled(bool(flags & 0x20))
+        self.color_btn.setEnabled(bool(flags & 0x10 and not (flags & 0x20 and self.rainbow.isChecked())))
+        self.bright.setEnabled(bool(flags & 0x01))
+        self.speed.setEnabled(bool(flags & 0x02))
+        for b in self.dir_group.buttons():
+            b.setEnabled(bool(flags & 0x0C))  # 0x04 horizontal, 0x08 vertical (Scrolling)
 
     def pick_effect_color(self):
-        c = colorchooser.askcolor(hexs(self.color), title="Effect color")[0]
+        c = self.pick_color(self.color, "Effect color")
         if c:
-            self.color = tuple(int(x) for x in c)
-            self.color_btn.configure(bg=hexs(self.color))
+            self.color = c
+            swatch(self.color_btn, c)
 
     def apply_effect(self):
         mode, flags = self.mode_id(), ak820.MODES[self.mode_id()][1]
-        rgb = None if (flags & 0x20 and self.rainbow.get()) or not flags & 0x10 else self.color
-        args = (mode, rgb, self.bright.get(), self.speed.get(), self.direction.get())
+        rgb = None if (flags & 0x20 and self.rainbow.isChecked()) or not flags & 0x10 else self.color
+        args = (mode, rgb, self.bright.value(), self.speed.value(), self.dir_group.checkedId())
         self.lighting = "effect"
         self.run("Effect " + ak820.MODES[mode][0], lambda kb: kb.set_mode(*args))
 
     # --- Per-key colors ---
-    def tab_keys(self, f):
+    def fill_keys(self, v):
         self.paint = (255, 0, 0)
-        self.key_colors = {name: (0, 0, 0) for name in ak820.KEYS}
-        top = ttk.Frame(f)
-        top.pack(fill="x", pady=(0, 8))
-        ttk.Label(top, text="Brush").pack(side="left")
-        self.paint_btn = tk.Button(top, width=6, bg=hexs(self.paint), command=self.pick_paint)
-        self.paint_btn.pack(side="left", padx=6)
-        ttk.Button(top, text="Paint all", command=self.paint_all).pack(side="left", padx=6)
-        ttk.Label(top, text="Brightness").pack(side="left", padx=(12, 0))
-        self.key_bright = tk.IntVar(value=5)
-        tk.Scale(top, from_=0, to=5, orient="horizontal", variable=self.key_bright,
-                 length=120).pack(side="left")
-        ttk.Button(top, text="Apply", command=self.apply_keys).pack(side="right")
+        self.key_colors = {}
+        self.paint_btn = QPushButton(objectName="swatch")
+        swatch(self.paint_btn, self.paint)
+        self.paint_btn.clicked.connect(self.pick_paint)
+        all_btn = QPushButton("Paint all")
+        all_btn.clicked.connect(self.paint_all)
+        self.key_bright, kn = slider(5)
+        v.addLayout(hbox(QLabel("Brush"), self.paint_btn, all_btn, QLabel("   Brightness"), self.key_bright, kn))
 
-        self.canvas = tk.Canvas(f, width=16 * U + GAP, height=6 * U + GAP, highlightthickness=0)
-        self.canvas.pack()
-        self.rects = {}
+        board = card(v)
+        board.setFixedSize(16 * U + GAP + 2 * PAD, 6 * U + GAP + 2 * PAD)
+        self.keys = {}
         x = y = 0
         for name in ak820.KEYS:
             w = WIDTH.get(name, 1) * U
-            r = self.canvas.create_rectangle(x + GAP, y + GAP, x + w, y + U, fill="#000000", outline="#666")
-            t = self.canvas.create_text(x + (w + GAP) / 2, y + (U + GAP) / 2, fill="white",
-                                        text=LABEL.get(name, name.upper() if len(name) == 1 else name.title()),
-                                        font=("TkDefaultFont", 8))
-            for item in (r, t):
-                self.canvas.tag_bind(item, "<Button-1>", lambda e, n=name: self.paint_key(n))
-            self.rects[name] = (r, t)
+            b = QPushButton(LABEL.get(name, name.upper() if len(name) == 1 else name.title()), board,
+                            objectName="key")
+            b.setGeometry(int(PAD + x + GAP), PAD + y + GAP, int(w - GAP), U - GAP)
+            b.clicked.connect(lambda _=False, n=name: self.paint_key(n))
+            self.keys[name] = b
+            self.paint_key(name, (0, 0, 0))
             x += w
             if name in ROW_ENDS:
                 x, y = 0, y + U
-        ttk.Label(f, text="Click a key to paint it with the brush color.").pack(anchor="w", pady=(6, 0))
+        v.addWidget(QLabel("Click a key to paint it with the brush color.", objectName="muted"))
 
     def pick_paint(self):
-        c = colorchooser.askcolor(hexs(self.paint), title="Brush color")[0]
+        c = self.pick_color(self.paint, "Brush color")
         if c:
-            self.paint = tuple(int(x) for x in c)
-            self.paint_btn.configure(bg=hexs(self.paint))
+            self.paint = c
+            swatch(self.paint_btn, c)
 
     def paint_key(self, name, color=None):
         color = color or self.paint
         self.key_colors[name] = color
-        r, t = self.rects[name]
-        self.canvas.itemconfigure(r, fill=hexs(color))
-        self.canvas.itemconfigure(t, fill="black" if sum(color) > 380 else "white")
+        self.keys[name].setStyleSheet(f"background: {hexs(color)}; color: {'black' if sum(color) > 380 else 'white'};")
 
     def paint_all(self):
-        for name in self.key_colors:
+        for name in self.keys:
             self.paint_key(name)
 
     def apply_keys(self):
         colors = {ak820.KEYS[n]: c for n, c in self.key_colors.items()}
-        b = self.key_bright.get()
+        b = self.key_bright.value()
         self.lighting = "keys"
         self.run("Per-key colors", lambda kb: kb.set_keys(colors, b))
 
     # --- Screen ---
-    def tab_screen(self, f):
-        self.image_path, self.preview = None, None
-        self.fit = tk.StringVar(value="crop")
-        ttk.Button(f, text="Choose image or GIF…", command=self.pick_image).grid(row=0, column=0, sticky="w")
-        self.image_lbl = ttk.Label(f, text="No file selected")
-        self.image_lbl.grid(row=0, column=1, sticky="w", padx=8)
-        self.preview_lbl = tk.Label(f, width=256, height=256, bg="black")
-        self.preview_lbl.grid(row=1, column=0, columnspan=2, pady=8)
-        fr = ttk.Frame(f)
-        fr.grid(row=2, column=0, columnspan=2, sticky="w")
-        for v, t in (("crop", "Crop to fill"), ("pad", "Fit with borders")):
-            ttk.Radiobutton(fr, text=t, value=v, variable=self.fit, command=self.show_preview).pack(side="left",
-                                                                                                    padx=(0, 10))
-        ttk.Button(f, text="Send to screen", command=self.apply_screen).grid(row=3, column=0, sticky="w",
-                                                                                pady=10)
+    def fill_screen(self, v):
+        self.image_path = None
+        pick = QPushButton("Choose image or GIF…")
+        pick.clicked.connect(self.pick_image)
+        self.image_lbl = QLabel("No file selected", objectName="muted")
+        v.addLayout(hbox(pick, self.image_lbl))
+        self.preview = QLabel(objectName="preview", alignment=Qt.AlignCenter)
+        self.preview.setFixedSize(256, 256)
+        v.addWidget(self.preview)
+        self.fit_group = QButtonGroup(self)
+        for i, t in enumerate(("Crop to fill", "Fit with borders")):
+            self.fit_group.addButton(QRadioButton(t), i)
+        self.fit_group.button(0).setChecked(True)
+        self.fit_group.buttonClicked.connect(lambda _: self.show_preview())
+        v.addLayout(hbox(*self.fit_group.buttons()))
+
+    def fit(self):
+        return FITS[self.fit_group.checkedId()]
 
     def pick_image(self):
-        p = filedialog.askopenfilename(filetypes=[("Images", "*.gif *.png *.jpg *.jpeg *.bmp *.webp"),
-                                                  ("All files", "*")])
+        p, _ = QFileDialog.getOpenFileName(self, "Choose image or GIF", "",
+                                           "Images (*.gif *.png *.jpg *.jpeg *.bmp *.webp);;All files (*)")
         if p:
             self.image_path = p
             self.show_preview()
 
     def show_preview(self):
         if not self.image_path:
-            self.preview_lbl.configure(image="")
-            return self.image_lbl.configure(text="No file selected")
-        from PIL import Image, ImageOps, ImageTk
-        im = Image.open(self.image_path)
-        n = getattr(im, "n_frames", 1)
-        first = im.convert("RGB")
-        first = ImageOps.fit(first, (128, 128)) if self.fit.get() == "crop" else ImageOps.pad(first, (128, 128))
-        self.preview = ImageTk.PhotoImage(first.resize((256, 256), Image.NEAREST))
-        self.preview_lbl.configure(image=self.preview, width=256, height=256)
+            self.preview.clear()
+            return self.image_lbl.setText("No file selected")
+        from PIL import Image, ImageOps
+        try:
+            im = Image.open(self.image_path)
+            n = getattr(im, "n_frames", 1)
+            first = im.convert("RGB")
+        except OSError as e:  # includes PIL.UnidentifiedImageError
+            self.image_path = None
+            self.say(f"Can't open image: {e}")
+            return self.show_preview()
+        first = ImageOps.fit(first, (128, 128)) if self.fit() == "crop" else ImageOps.pad(first, (128, 128))
+        data = first.tobytes()  # must outlive the QImage until fromImage copies it
+        self.preview.setPixmap(QPixmap.fromImage(QImage(data, 128, 128, 384, QImage.Format_RGB888)).scaled(256, 256))
         extra = f" (only the first {ak820.MAX_FRAMES} will be sent)" if n > ak820.MAX_FRAMES else ""
-        self.image_lbl.configure(text=f"{os.path.basename(self.image_path)} — {n} frame(s){extra}")
+        self.image_lbl.setText(f"{os.path.basename(self.image_path)} — {n} frame(s){extra}")
 
     def apply_screen(self):
         if not self.image_path:
-            return self.status.set("Choose an image first.")
-        path, fit = self.image_path, self.fit.get()
+            return self.say("Choose an image first.")
+        path, fit = self.image_path, self.fit()
 
         def job(kb):
             blob = ak820.screen_blob(ak820.load_frames(path, fit))
-            kb.upload_screen(blob, lambda i, n: self.jobs.put(("progress", 100 * i / n)))
+            kb.upload_screen(blob, lambda i, n: self.progress.emit(int(100 * i / n)))
         self.run("Screen upload", job)
 
     # --- Clock ---
-    def tab_clock(self, f):
-        ttk.Label(f, text="Sets the keyboard screen clock to this computer's time.").pack(anchor="w")
-        ttk.Button(f, text="Sync now", command=lambda: self.run("Clock", lambda kb: kb.sync_time())
-                   ).pack(anchor="w", pady=10)
+    def fill_clock(self, v):
+        v.addWidget(QLabel("Sets the keyboard screen clock to this computer's time.", objectName="muted"))
+
+    def sync_clock(self):
+        self.run("Clock", lambda kb: kb.sync_time())
 
 
 def selftest():
-    """Settings survive close + reopen (uses a temp config, no keyboard needed)."""
+    """Settings survive close + reopen, bad inputs don't crash (temp config, no keyboard, no window)."""
     import tempfile
-    path = os.path.join(tempfile.mkdtemp(), "config.json")
-    a = App(tk.Tk(), path)
-    a.mode.current(10); a.rainbow.set(False); a.color = (1, 2, 3); a.direction.set(1)
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    app = QApplication.instance() or QApplication([])
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "config.json")
+    a = App(path)
+    a.modes.button(10).setChecked(True); a.rainbow.setChecked(False); a.color = (1, 2, 3)
+    a.dir_group.button(1).setChecked(True)
     a.paint = (9, 8, 7); a.paint_key("w"); a.lighting = "keys"
-    a.profile.set("night"); a.save_profile()
+    a.profile.setCurrentText("night"); a.save_profile()
     st = a.get_state()
-    a.quit()
-    b = App(tk.Tk(), path)
+    a.close()
+    b = App(path)
     assert b.get_state() == st and b.cfg["profiles"]["night"] == st, (b.get_state(), st)
-    b.root.destroy()
+    # stale or hand-edited state: unknown mode, key and fit, image file gone
+    b.set_state(dict(mode=99, keys={"bogus": "#ffffff"}, fit="zoom", image=os.path.join(d, "gone.gif")))
+    assert (b.mode_id(), b.fit(), b.image_path) == (11, "crop", None)
+    # a file that is not an image
+    b.image_path = path
+    b.show_preview()
+    assert b.image_path is None and b.statusBar().currentMessage().startswith("Can't open image")
+    # keyboard missing: the error is shown and the app is not stuck busy
+    real, ak820.Kbd = ak820.Kbd, lambda: sys.exit("AK820 not found")
+    try:
+        b.run("Clock", lambda kb: None)
+        while b.busy:
+            app.processEvents()
+    finally:
+        ak820.Kbd = real
+    assert b.statusBar().currentMessage() == "Error: AK820 not found", b.statusBar().currentMessage()
+    b.close()
+    # a corrupted config is kept aside and the app starts with defaults
+    with open(path, "w") as f:
+        f.write("{not json")
+    c = App(path)
+    assert os.path.exists(path + ".bad") and c.cfg["profiles"] == {}
+    c.close()
     print("gui selftest ok")
 
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["selftest"]:
         sys.exit(selftest())
-    root = tk.Tk(className="ak820")  # matches StartupWMClass in ak820.desktop
-    root.iconphoto(True, tk.PhotoImage(file=os.path.join(os.path.dirname(os.path.realpath(__file__)), "ak820.png")))
-    App(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    app.setDesktopFileName("ak820")  # matches StartupWMClass in ak820.desktop
+    app.setWindowIcon(QIcon(os.path.join(os.path.dirname(os.path.realpath(__file__)), "ak820.png")))
+    w = App()
+    w.show()
+    sys.exit(app.exec())
