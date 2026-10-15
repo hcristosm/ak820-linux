@@ -15,6 +15,31 @@ LABEL = dict(grave="`", minus="-", equal="=", lbracket="[", rbracket="]", backsl
              rctrl="Ctrl", lalt="Alt", ralt="Alt", delete="Del", pgup="PgUp", pgdn="PgDn")
 U, GAP = 40, 3  # pixels per key unit, gap between keys
 CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "ak820", "config.json")
+BG, SURFACE, FG, ACCENT = "#16181d", "#1f2229", "#e6e6e6", "#22d3ee"
+
+
+def apply_theme(root):
+    root.configure(bg=BG)
+    for k, v in (("*background", BG), ("*foreground", FG), ("*troughColor", SURFACE),
+                 ("*highlightThickness", 0), ("*activeBackground", SURFACE),
+                 ("*TCombobox*Listbox.background", SURFACE), ("*TCombobox*Listbox.selectBackground", ACCENT)):
+        root.option_add(k, v)  # plain tk widgets: scales, color swatches, combobox dropdown, dialogs
+    s = ttk.Style(root)
+    s.theme_use("clam")
+    s.configure(".", background=BG, foreground=FG, fieldbackground=SURFACE, bordercolor=SURFACE,
+                lightcolor=SURFACE, darkcolor=SURFACE, troughcolor=SURFACE, arrowcolor=FG)
+    s.configure("TNotebook.Tab", padding=(14, 6), bordercolor=BG)
+    s.map("TNotebook.Tab", background=[("selected", SURFACE)], foreground=[("selected", ACCENT)],
+          lightcolor=[("selected", SURFACE)])
+    hover = [("active", "#2a2e37")]  # clam's own hover/pressed/disabled colors are near-white
+    s.map(".", background=[("disabled", BG)] + hover)
+    s.map("TButton", background=hover, lightcolor=[("pressed", SURFACE)], darkcolor=[("pressed", SURFACE)])
+    s.map("TCombobox", background=hover, fieldbackground=[("readonly", SURFACE)], foreground=[("readonly", FG)])
+    s.configure("TButton", background=SURFACE, padding=(12, 4))
+    s.configure("Accent.TButton", background=ACCENT, foreground=BG, bordercolor=ACCENT, lightcolor=ACCENT,
+                darkcolor=ACCENT, focuscolor=BG)
+    s.map("Accent.TButton", background=[("active", "#67e8f9")])
+    s.configure("TProgressbar", background=ACCENT)
 
 
 def hexs(rgb):
@@ -45,13 +70,15 @@ class App:
         self.cfg_path, self.cfg, self.lighting = cfg_path, load_config(cfg_path), "effect"
         self.cfg.setdefault("profiles", {})
         root.title(f"AJAZZ AK820 Pro {ak820.__version__}")
+        apply_theme(root)
         bar = ttk.Frame(root)
         bar.pack(fill="x", padx=8, pady=(8, 0))
-        ttk.Label(bar, text="Profile").pack(side="left")
+        ttk.Label(bar, text="AK820 Pro", font=("TkDefaultFont", 13, "bold")).pack(side="left")
+        for txt, cmd in (("Delete", self.delete_profile), ("Save", self.save_profile), ("Load", self.load_profile)):
+            ttk.Button(bar, text=txt, command=cmd).pack(side="right", padx=2)
         self.profile = ttk.Combobox(bar, width=20)
-        self.profile.pack(side="left", padx=6)
-        for txt, cmd in (("Load", self.load_profile), ("Save", self.save_profile), ("Delete", self.delete_profile)):
-            ttk.Button(bar, text=txt, command=cmd).pack(side="left", padx=2)
+        self.profile.pack(side="right", padx=6)
+        ttk.Label(bar, text="Profile").pack(side="right")
         nb = ttk.Notebook(root)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
         for title, build in (("Effects", self.tab_effects), ("Per-key colors", self.tab_keys),
@@ -196,7 +223,7 @@ class App:
                         for v, t in ((0, "→ / ↓"), (1, "← / ↑"))]
         for rb in self.dir_rbs:
             rb.pack(side="left", padx=(0, 10))
-        ttk.Button(f, text="Apply", command=self.apply_effect).grid(row=6, column=1, sticky="w", pady=10)
+        ttk.Button(f, text="Apply", command=self.apply_effect, style="Accent.TButton").grid(row=6, column=1, sticky="w", pady=10)
         self.update_effect_controls()
 
     def mode_id(self):
@@ -240,18 +267,18 @@ class App:
         self.key_bright = tk.IntVar(value=5)
         tk.Scale(top, from_=0, to=5, orient="horizontal", variable=self.key_bright,
                  length=120).pack(side="left")
-        ttk.Button(top, text="Apply", command=self.apply_keys).pack(side="right")
+        ttk.Button(top, text="Apply", command=self.apply_keys, style="Accent.TButton").pack(side="right")
 
-        self.canvas = tk.Canvas(f, width=16 * U + GAP, height=6 * U + GAP, highlightthickness=0)
+        self.canvas = tk.Canvas(f, width=16 * U + GAP, height=6 * U + GAP, highlightthickness=0, bg=BG)
         self.canvas.pack()
         self.rects = {}
         x = y = 0
         for name in ak820.KEYS:
             w = WIDTH.get(name, 1) * U
-            r = self.canvas.create_rectangle(x + GAP, y + GAP, x + w, y + U, fill="#000000", outline="#666")
+            r = self.canvas.create_rectangle(x + GAP, y + GAP, x + w, y + U, fill="#000000", outline="#2e323b")
             t = self.canvas.create_text(x + (w + GAP) / 2, y + (U + GAP) / 2, fill="white",
                                         text=LABEL.get(name, name.upper() if len(name) == 1 else name.title()),
-                                        font=("TkDefaultFont", 8))
+                                        font=("TkDefaultFont", 9))
             for item in (r, t):
                 self.canvas.tag_bind(item, "<Button-1>", lambda e, n=name: self.paint_key(n))
             self.rects[name] = (r, t)
@@ -297,7 +324,7 @@ class App:
         for v, t in (("crop", "Crop to fill"), ("pad", "Fit with borders")):
             ttk.Radiobutton(fr, text=t, value=v, variable=self.fit, command=self.show_preview).pack(side="left",
                                                                                                     padx=(0, 10))
-        ttk.Button(f, text="Send to screen", command=self.apply_screen).grid(row=3, column=0, sticky="w",
+        ttk.Button(f, text="Send to screen", command=self.apply_screen, style="Accent.TButton").grid(row=3, column=0, sticky="w",
                                                                                 pady=10)
 
     def pick_image(self):
@@ -334,8 +361,8 @@ class App:
     # --- Clock ---
     def tab_clock(self, f):
         ttk.Label(f, text="Sets the keyboard screen clock to this computer's time.").pack(anchor="w")
-        ttk.Button(f, text="Sync now", command=lambda: self.run("Clock", lambda kb: kb.sync_time())
-                   ).pack(anchor="w", pady=10)
+        ttk.Button(f, text="Sync now", command=lambda: self.run("Clock", lambda kb: kb.sync_time()),
+                   style="Accent.TButton").pack(anchor="w", pady=10)
 
 
 def selftest():
