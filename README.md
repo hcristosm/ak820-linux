@@ -49,9 +49,12 @@ You can also run `./ak820.py` or `./ak820_gui.py` straight from the cloned folde
 
 ## Usage
 
-GUI: open **AJAZZ AK820 Pro** from the app menu, or run `ak820-gui`. It remembers your settings between runs and lets you
-save named profiles (Load applies the profile's lighting; the screen image is remembered but not re-sent).
-Settings live in `~/.config/ak820/config.json`.
+GUI: open **AJAZZ AK820 Pro** from the app menu, or run `ak820-gui`.
+
+- tabs for Effects, Per-key colors (click keys to paint them), Screen (with preview) and Clock
+- settings are remembered between runs, in `~/.config/ak820/config.json`
+- **Profile** bar: type a name and Save; Load fills in the tabs and applies the profile's lighting
+  (the screen image is remembered but not re-sent, since uploads take a few seconds); Delete asks first
 
 Command line:
 
@@ -62,8 +65,11 @@ ak820 keys --all 101010 w=ff0000 a=ff0000 s=ff0000 d=ff0000
 ak820 keys --list                             # key names
 ak820 screen picture.gif                      # also png/jpg; --fit pad keeps the whole image
 ak820 time                                    # sync the clock
-ak820 selftest                                # checks the packet builders, no keyboard needed
+ak820 --version
 ```
+
+Self-checks that need no keyboard: `ak820 selftest` (packet builders) and `ak820-gui selftest`
+(settings and profiles survive a restart).
 
 Effects: `off static singleon singleoff glittering falling colourful breath spectrum outward scrolling
 rolling rotating explode launch ripples flowing pulsating tilt shuttle` (or their numbers 0-19).
