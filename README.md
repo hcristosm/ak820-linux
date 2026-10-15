@@ -29,13 +29,15 @@ sudo dnf install python3-tkinter python3-pillow                 # Fedora
 sudo apt install python3-tk python3-pil python3-pil.imagetk     # Debian / Ubuntu
 ```
 
-Then:
+Then download the [latest release](https://github.com/hcristosm/ak820-linux/releases/latest) and run the installer:
 
 ```sh
-git clone https://github.com/hcristosm/ak820-linux
-cd ak820-linux
+curl -L https://github.com/hcristosm/ak820-linux/archive/refs/tags/v0.1.0.tar.gz | tar xz
+cd ak820-linux-0.1.0
 ./install.sh
 ```
+
+(or `git clone https://github.com/hcristosm/ak820-linux` for the latest code.)
 
 `install.sh` copies the program to `~/.local/share/ak820`, adds `ak820` and `ak820-gui` to `~/.local/bin`,
 creates an "AJAZZ AK820 Pro" entry in the app menu, and installs a udev rule (asks for sudo once) so your

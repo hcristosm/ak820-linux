@@ -7,6 +7,8 @@ Protocol recovered from the vendor's DeviceDriver.exe v1.0.0.5:
 """
 import argparse, fcntl, glob, os, select, sys, time
 
+__version__ = "0.1.0"
+
 VID_PIDS = {(0x0C45, 0x8009), (0x0C45, 0x800A)}
 DELAY = 0.035  # <cmd_delaytime value="35"/> from the vendor's rgb-keyboard.xml
 W = H = 128    # <screen width="128" height="128" gif_headlength="256" gif_maxframes="140"/>
@@ -185,6 +187,7 @@ def hexrgb(s):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--version", action="version", version=__version__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("mode", help="built-in lighting effect")
     m.add_argument("mode", help="name or number: " + ", ".join(f"{i}={n}" for i, (n, _) in MODES.items()))

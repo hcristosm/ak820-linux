@@ -23,7 +23,7 @@ def hexs(rgb):
 class App:
     def __init__(self, root):
         self.root, self.jobs, self.busy = root, queue.Queue(), False
-        root.title("AJAZZ AK820 Pro")
+        root.title(f"AJAZZ AK820 Pro {ak820.__version__}")
         nb = ttk.Notebook(root)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
         for title, build in (("Efeitos", self.tab_effects), ("Cores por tecla", self.tab_keys),
