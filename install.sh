@@ -13,9 +13,10 @@ if [ "$1" = "--uninstall" ]; then
     exit 0
 fi
 
-python3 -c "import PIL, tkinter" 2>/dev/null || {
-    echo "Missing dependencies. Fedora: sudo dnf install python3-tkinter python3-pillow"
-    echo "                      Debian/Ubuntu: sudo apt install python3-tk python3-pil python3-pil.imagetk"
+python3 -c "import PIL, PySide6" 2>/dev/null || {
+    echo "Missing dependencies. Fedora: sudo dnf install python3-pyside6 python3-pillow"
+    echo "                      Debian/Ubuntu: sudo apt install python3-pyside6.qtwidgets python3-pil"
+    echo "                      elsewhere: pip install --user PySide6 pillow"
     exit 1
 }
 mkdir -p "$DEST" "$HOME/.local/bin" "$APPS"

@@ -22,12 +22,16 @@ The 2.4 GHz dongle (`0c45:fdfd`) and Bluetooth are not supported. Connect the ke
 
 ## Install
 
-Needs Python 3 with Tkinter and Pillow:
+Needs Python 3 with PySide6 (Qt 6) and Pillow:
 
 ```sh
-sudo dnf install python3-tkinter python3-pillow                 # Fedora
-sudo apt install python3-tk python3-pil python3-pil.imagetk     # Debian / Ubuntu
+sudo dnf install python3-pyside6 python3-pillow                 # Fedora
+sudo apt install python3-pyside6.qtwidgets python3-pil          # Debian 13+ / Ubuntu 24.10+
+pip install --user PySide6 pillow                               # anything else
 ```
+
+Prefer a lighter GUI without Qt? The Tkinter version lives on the
+[`tk-gui`](https://github.com/hcristosm/ak820-linux/tree/tk-gui) branch.
 
 Then download the [latest release](https://github.com/hcristosm/ak820-linux/releases/latest) and run the installer:
 
@@ -51,9 +55,10 @@ You can also run `./ak820.py` or `./ak820_gui.py` straight from the cloned folde
 
 GUI: open **AJAZZ AK820 Pro** from the app menu, or run `ak820-gui`.
 
-- tabs for Effects, Per-key colors (click keys to paint them), Screen (with preview) and Clock
+- sidebar with Effects (pick one from the gallery), Per-key colors (click keys to paint them),
+  Screen (with preview) and Clock
 - settings are remembered between runs, in `~/.config/ak820/config.json`
-- **Profile** bar: type a name and Save; Load fills in the tabs and applies the profile's lighting
+- **Profile** (bottom of the sidebar): type a name and Save; Load fills in the pages and applies the profile's lighting
   (the screen image is remembered but not re-sent, since uploads take a few seconds); Delete asks first
 
 Command line:
