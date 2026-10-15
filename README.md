@@ -32,8 +32,8 @@ sudo apt install python3-tk python3-pil python3-pil.imagetk     # Debian / Ubunt
 Then download the [latest release](https://github.com/hcristosm/ak820-linux/releases/latest) and run the installer:
 
 ```sh
-curl -L https://github.com/hcristosm/ak820-linux/archive/refs/tags/v0.1.0.tar.gz | tar xz
-cd ak820-linux-0.1.0
+curl -L https://github.com/hcristosm/ak820-linux/archive/refs/tags/v0.1.1.tar.gz | tar xz
+cd ak820-linux-0.1.1
 ./install.sh
 ```
 
