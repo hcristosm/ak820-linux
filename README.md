@@ -7,7 +7,7 @@ without the vendor's Windows-only software.
 - per-key static colors
 - upload an image or animated GIF (up to 140 frames) to the screen
 - sync the screen clock to your PC
-- music mode: the keys become a level meter of whatever your PC is playing
+- music mode: the keys react to whatever your PC is playing (level meter, center, spectrum or beat pulse)
 - command line tool and a small GUI with saved profiles
 
 Unofficial project. Not affiliated with or endorsed by AJAZZ.
@@ -31,7 +31,8 @@ sudo apt install python3-pyside6.qtwidgets python3-pil          # Debian 13+ / U
 pip install --user PySide6 pillow                               # anything else
 ```
 
-Music mode also needs `parec` (package `pulseaudio-utils`; works with PipeWire too).
+Music mode also needs `parec` (package `pulseaudio-utils`; works with PipeWire too), and its spectrum style
+needs numpy (`python3-numpy`).
 
 Prefer a lighter GUI without Qt? The Tkinter version lives on the
 [`tk-gui`](https://github.com/hcristosm/ak820-linux/tree/tk-gui) branch.
@@ -59,7 +60,7 @@ You can also run `./ak820.py` or `./ak820_gui.py` straight from the cloned folde
 GUI: open **AJAZZ AK820 Pro** from the app menu, or run `ak820-gui`.
 
 - sidebar with Effects (pick one from the gallery), Per-key colors (click keys to paint them),
-  Screen (with preview), Clock and Music (Start/Stop, sensitivity)
+  Screen (with preview), Clock and Music (Start/Stop, style, colors, sensitivity; changes apply live)
 - settings are remembered between runs, in `~/.config/ak820/config.json`
 - **Profile** (bottom of the sidebar): type a name and Save; Load fills in the pages and applies the profile's lighting
   (the screen image is remembered but not re-sent, since uploads take a few seconds); Delete asks first
@@ -73,7 +74,9 @@ ak820 keys --all 101010 w=ff0000 a=ff0000 s=ff0000 d=ff0000
 ak820 keys --list                             # key names
 ak820 screen picture.gif                      # also png/jpg; --fit pad keeps the whole image
 ak820 time                                    # sync the clock
-ak820 music -g 1.5                            # level meter of the system audio until Ctrl-C; -g = sensitivity
+ak820 music -g 1.5                            # react to the system audio until Ctrl-C; -g = sensitivity
+ak820 music --style spectrum --colors rainbow # styles: meter center spectrum pulse
+ak820 music --style pulse --colors ff0080-00ffff   # colors: classic, rainbow, or two colors
 ak820 --version
 ```
 
@@ -110,8 +113,7 @@ both are in `ak820.py`.
 
 ## Not implemented
 
-Key remapping, macros, and wireless (2.4 GHz) mode. The music mode is a simple level meter, not the
-vendor's spectrum styles.
+Key remapping, macros, and wireless (2.4 GHz) mode. Music styles are this project's own, not the vendor's.
 
 ## License
 

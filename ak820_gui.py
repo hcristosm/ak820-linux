@@ -133,7 +133,7 @@ class App(QMainWindow):
         pal.setColor(QPalette.Button, QColor(BG))
         pal.setColor(QPalette.ButtonText, QColor(FG))
         app.setPalette(pal)
-        self.busy, self.lighting, self.music_stop, self.music_gain = False, "effect", None, 1.0
+        self.busy, self.lighting, self.music_stop = False, "effect", None
         self.cfg_path, self.cfg = cfg_path, load_config(cfg_path)
         if not isinstance(self.cfg.get("profiles"), dict):
             self.cfg["profiles"] = {}
@@ -207,7 +207,9 @@ class App(QMainWindow):
         return dict(mode=self.mode_id(), rainbow=self.rainbow.isChecked(), color=hexs(self.color),
                     brightness=self.bright.value(), speed=self.speed.value(), direction=self.dir_group.checkedId(),
                     keys={n: hexs(c) for n, c in self.key_colors.items()}, key_brightness=self.key_bright.value(),
-                    lighting=self.lighting, image=self.image_path, fit=self.fit())
+                    lighting=self.lighting, image=self.image_path, fit=self.fit(),
+                    music=dict(style=self.music_style.checkedId(), palette=self.music_pal.checkedId(),
+                               colors=[hexs(c) for c in self.music_colors], sensitivity=self.music_sens.value()))
 
     def set_state(self, st):
         (self.modes.button(st.get("mode", 11)) or self.modes.button(11)).setChecked(True)
@@ -227,6 +229,13 @@ class App(QMainWindow):
         self.image_path = img if img and os.path.exists(img) else None
         self.show_preview()
         self.update_effect_controls()
+        m = st.get("music", {})
+        (self.music_style.button(m.get("style", 0)) or self.music_style.button(0)).setChecked(True)
+        (self.music_pal.button(m.get("palette", 0)) or self.music_pal.button(0)).setChecked(True)
+        if len(m.get("colors", ())) == 2:
+            self.music_colors = [ak820.hexrgb(c) for c in m["colors"]]
+        self.music_sens.setValue(m.get("sensitivity", 2))
+        self.update_music_opts()
 
     def persist(self):
         self.cfg["last"] = self.get_state()
@@ -478,11 +487,50 @@ class App(QMainWindow):
 
     # --- Music ---
     def fill_music(self, v):
-        v.addWidget(QLabel("Lights the keys as a level meter of whatever this computer is playing.\n"
+        v.addWidget(QLabel("Lights the keys to whatever this computer is playing.\n"
                            "Your saved effect comes back by itself when you stop.", objectName="muted"))
-        s, n = slider(2)
-        s.valueChanged.connect(lambda x: setattr(self, "music_gain", (x + 1) / 3))  # 0..5 -> 0.33..2
-        v.addLayout(hbox(QLabel("Sensitivity"), s, n))
+        self.music_style, self.music_pal = QButtonGroup(self), QButtonGroup(self)
+        for i, name in enumerate(ak820.STYLES):
+            self.music_style.addButton(QPushButton(name.title(), checkable=True), i)
+        for i, t in enumerate(("Classic", "Rainbow", "Custom")):
+            self.music_pal.addButton(QRadioButton(t), i)
+        self.music_style.button(0).setChecked(True)
+        self.music_pal.button(0).setChecked(True)
+        self.music_colors = [(0, 255, 255), (255, 0, 255)]
+        self.music_swatches = [QPushButton(objectName="swatch") for _ in range(2)]
+        for i, b in enumerate(self.music_swatches):
+            swatch(b, self.music_colors[i])
+            b.clicked.connect(lambda _=False, i=i: self.pick_music_color(i))
+        self.music_sens, n = slider(2)
+        form = QGridLayout(card(v))
+        form.setContentsMargins(18, 16, 18, 16)
+        form.setVerticalSpacing(12)
+        for r, (txt, row) in enumerate((("Style", hbox(*self.music_style.buttons())),
+                                        ("Colors", hbox(*self.music_pal.buttons(), *self.music_swatches)),
+                                        ("Sensitivity", hbox(self.music_sens, n)))):
+            form.addWidget(QLabel(txt), r, 0)
+            form.addLayout(row, r, 1)
+        v.addWidget(QLabel("Spectrum needs numpy. Changes apply while the music mode is running.", objectName="muted"))
+        self.music_style.buttonClicked.connect(self.update_music_opts)
+        self.music_pal.buttonClicked.connect(self.update_music_opts)
+        self.music_sens.valueChanged.connect(self.update_music_opts)
+        self.update_music_opts()
+
+    def update_music_opts(self, *_):
+        pal = self.music_pal.checkedId()
+        for b in self.music_swatches:
+            b.setEnabled(pal == 2)
+        # replaced whole, so the music thread always reads a consistent dict
+        self.music_opts = dict(style=ak820.STYLES[self.music_style.checkedId()],
+                               gain=(self.music_sens.value() + 1) / 3,  # slider 0..5 -> 0.33..2
+                               colors=(None, "rainbow", tuple(self.music_colors))[pal])
+
+    def pick_music_color(self, i):
+        c = self.pick_color(self.music_colors[i], "Music color")
+        if c:
+            self.music_colors[i] = c
+            swatch(self.music_swatches[i], c)
+            self.update_music_opts()
 
     def toggle_music(self):
         if self.music_stop:
@@ -492,7 +540,7 @@ class App(QMainWindow):
         self.music_btn, stop = self.sender(), threading.Event()
         self.music_stop = stop
         self.music_btn.setText("Stop")
-        self.run("Music", lambda kb: ak820.music(kb, lambda: self.music_gain, stop.is_set))
+        self.run("Music", lambda kb: ak820.music(kb, lambda: self.music_opts, stop.is_set))
 
 
 def selftest():
@@ -506,6 +554,9 @@ def selftest():
     a.modes.button(10).setChecked(True); a.rainbow.setChecked(False); a.color = (1, 2, 3)
     a.dir_group.button(1).setChecked(True)
     a.paint = (9, 8, 7); a.paint_key("w"); a.lighting = "keys"
+    a.music_style.button(2).setChecked(True); a.music_pal.button(2).setChecked(True)
+    a.music_colors = [(1, 1, 1), (2, 2, 2)]; a.music_sens.setValue(4); a.update_music_opts()
+    assert a.music_opts == dict(style="spectrum", gain=5 / 3, colors=((1, 1, 1), (2, 2, 2)))
     a.profile.setCurrentText("night"); a.save_profile()
     st = a.get_state()
     a.close()
@@ -528,7 +579,8 @@ def selftest():
         ak820.Kbd = real
     assert b.statusBar().currentMessage() == "Error: AK820 not found", b.statusBar().currentMessage()
     # music: Start runs until Stop, then the button and busy flag reset
-    def fake_music(kb, gain, stop):
+    def fake_music(kb, opts, stop):
+        assert opts()["style"] in ak820.STYLES
         while not stop():
             threading.Event().wait(0.01)
     real_kbd, real_music = ak820.Kbd, ak820.music

@@ -5,7 +5,7 @@ Protocol recovered from the vendor's DeviceDriver.exe v1.0.0.5:
   - commands: 64-byte HID feature reports on the vendor interface (usage page 0xff13)
   - screen data: 4096-byte output reports on the vendor interface (usage page 0xff68)
 """
-import argparse, array, fcntl, glob, os, select, subprocess, sys, time
+import argparse, array, colorsys, fcntl, glob, os, select, subprocess, sys, time
 
 __version__ = "0.2.0"
 
@@ -151,8 +151,8 @@ def live_packet(colors):
     return b"".join(bytes([i, *rgb]) for i, rgb in sorted(colors.items())[:128]).ljust(512, b"\0")
 
 
-def key_columns():
-    """light_index -> horizontal position 0..1 in its row."""
+def key_grid():
+    """light_index -> (x, y): position 0..1 in its row (left->right) and row 0..1 (top->bottom)."""
     # ponytail: rank in the row, not physical position (space counts as one key); use key widths if it looks off
     rows, row = [], []
     for name, idx in KEYS.items():
@@ -160,13 +160,40 @@ def key_columns():
         if name in ROW_ENDS:
             rows.append(row)
             row = []
-    return {idx: i / (len(r) - 1) for r in rows for i, idx in enumerate(r)}
+    return {idx: (i / (len(r) - 1), j / (len(rows) - 1)) for j, r in enumerate(rows) for i, idx in enumerate(r)}
 
 
-def vu_colors(level, columns):
-    """Level meter: keys left of `level` (0..1) light green -> yellow -> red, the rest are off."""
-    return {i: (min(255, int(510 * x)), min(255, int(510 * (1 - x))), 0) if x < level else (0, 0, 0)
-            for i, x in columns.items()}
+def grad(t, colors=None):
+    """t 0..1 -> rgb. colors: None = green->yellow->red, "rainbow", or a (from_rgb, to_rgb) pair."""
+    if colors == "rainbow":
+        return tuple(int(255 * c) for c in colorsys.hsv_to_rgb(0.8 * t, 1, 1))
+    if colors:
+        (r1, g1, b1), (r2, g2, b2) = colors
+        return int(r1 + (r2 - r1) * t), int(g1 + (g2 - g1) * t), int(b1 + (b2 - b1) * t)
+    return min(255, int(510 * t)), min(255, int(510 * (1 - t))), 0
+
+
+STYLES = ("meter", "center", "spectrum", "pulse")
+BANDS = 16    # spectrum columns
+TILT = 0.15   # spectrum: boost per band so treble isn't always lower than bass (music falls ~3 dB/octave)
+
+
+def render(style, grid, colors, level=0.0, bands=(), pulse=(0.0, 0.0)):
+    """One music frame {light_index: rgb}. level 0..1; bands: BANDS values 0..1; pulse: (strength 0..1, color t)."""
+    if style == "pulse":
+        k, t = pulse
+        c = tuple(int(v * k) for v in grad(t, colors))
+        return {i: c for i in grid}
+    out = {}
+    for i, (x, y) in grid.items():
+        if style == "spectrum":  # column = band (bass left), rows fill from the bottom
+            h = 1 - y
+            lit = bands[round(x * (len(bands) - 1))] > h * 0.9 + 0.05
+        else:  # meter fills left->right, center fills outwards
+            h = abs(x - 0.5) * 2 if style == "center" else x
+            lit = h < level
+        out[i] = grad(h, colors) if lit else (0, 0, 0)
+    return out
 
 
 def rms(pcm):
@@ -175,28 +202,58 @@ def rms(pcm):
     return (sum(v * v for v in a) / len(a)) ** 0.5 / 32768 if a else 0.0
 
 
-def music(kb, gain=lambda: 1.0, stop=lambda: False):
-    """Light the keyboard as a level meter of whatever the system is playing, until stop() is true."""
+def spectrum(pcm, n=BANDS, rate=44100):
+    """Log-spaced band levels (40 Hz..16 kHz, natural-log magnitude) of s16le mono samples."""
+    try:
+        import numpy as np
+    except ImportError:
+        sys.exit("the spectrum style needs numpy (Fedora: python3-numpy, Debian/Ubuntu: python3-numpy)")
+    a = np.frombuffer(pcm[len(pcm) % 2:], "<i2").astype(float)
+    mag = np.abs(np.fft.rfft(a * np.hanning(len(a))))
+    freqs = np.fft.rfftfreq(len(a), 1 / rate)
+    edges = np.geomspace(40, 16000, n + 1)
+    return [float(np.log1p(mag[(freqs >= lo) & (freqs < hi)].mean())) if ((freqs >= lo) & (freqs < hi)).any()
+            else 0.0 for lo, hi in zip(edges, edges[1:])]
+
+
+def music(kb, opts=lambda: {}, stop=lambda: False):
+    """Light the keys from whatever the system is playing until stop() is true.
+    opts() is read every frame: dict(style=STYLES item, gain=sensitivity, colors=see grad)."""
     try:
         rec = subprocess.Popen(["parec", "--device=@DEFAULT_MONITOR@", "--format=s16le", "--rate=44100",
                                 "--channels=1", "--latency-msec=20", "--raw"], stdout=subprocess.PIPE)
     except FileNotFoundError:
         sys.exit("music needs parec (Fedora: pulseaudio-utils, Debian/Ubuntu: pulseaudio-utils)")
-    fd, buf, peak, shown, cols = rec.stdout.fileno(), b"", 0.05, 0.0, key_columns()
+    fd, buf, grid = rec.stdout.fileno(), b"", key_grid()
+    peak, shown, bpeak, bshown = 0.05, 0.0, 1.0, [0.0] * BANDS
+    avg, k, t, last_beat = 0.0, 0.0, 0.0, 0.0
     os.set_blocking(fd, False)
     try:
         while not stop():
+            o = opts()
+            style, gain, colors = o.get("style", "meter"), o.get("gain", 1.0), o.get("colors")
             try:
                 chunk = os.read(fd, 65536)
                 if not chunk:
                     sys.exit("parec stopped (no audio server?)")
-                buf = (buf + chunk)[-2048:]  # newest ~23 ms; older audio is already stale
+                buf = (buf + chunk)[-8192:]  # newest ~93 ms; older audio is already stale
             except BlockingIOError:
                 pass
-            level = rms(buf)
+            level = rms(buf[-2048:])
             peak = max(level, peak * 0.995, 0.01)  # auto gain: follows the loudest recent moment
-            shown = max(min(1.0, level / peak * gain()), shown * 0.8)  # fast attack, smooth fall
-            kb.live(vu_colors(shown, cols))  # ~60 ms per frame paces the loop
+            shown = max(min(1.0, level / peak * gain), shown * 0.8)  # fast attack, smooth fall
+            if style == "spectrum" and len(buf) >= 4096:
+                raw = [v + TILT * i for i, v in enumerate(spectrum(buf))]
+                bpeak = max(max(raw), bpeak * 0.995, 1.0)
+                # show the top 4*gain log units (~35 dB at gain 1) under the recent peak
+                bshown = [max(min(1.0, max(0.0, 1 - (bpeak - v) / (4 * gain))), s * 0.8) for v, s in zip(raw, bshown)]
+            now = time.monotonic()
+            if level * gain > avg * 1.5 and level > 0.01 and now - last_beat > 0.15:  # beat: jump above the average
+                k, t, last_beat = 1.0, (t + 0.37) % 1, now
+            else:
+                k *= 0.8
+            avg = avg * 0.9 + level * 0.1
+            kb.live(render(style, grid, colors, shown, bshown, (k, t)))  # ~60 ms per frame paces the loop
     finally:
         rec.terminate()
 
@@ -269,6 +326,11 @@ def main():
     sub.add_parser("time", help="sync the screen clock to this PC")
     mu = sub.add_parser("music", help="level meter of the system audio on the keys, until Ctrl-C")
     mu.add_argument("-g", "--gain", type=float, default=1.0, help="sensitivity (default 1.0)")
+    mu.add_argument("--style", choices=STYLES, default="meter",
+                    help="meter: fills left->right, center: fills outwards, spectrum: equalizer (needs numpy), "
+                         "pulse: whole keyboard flashes on beats")
+    mu.add_argument("--colors", default="classic",
+                    help="classic (green->yellow->red), rainbow, or two colors RRGGBB-RRGGBB")
     sub.add_parser("selftest", help="check packet builders (no keyboard needed)")
     a = ap.parse_args()
 
@@ -298,8 +360,9 @@ def main():
     elif a.cmd == "time":
         kb.sync_time()
     elif a.cmd == "music":
+        colors = {"classic": None, "rainbow": "rainbow"}.get(a.colors) or tuple(map(hexrgb, a.colors.split("-")))
         try:
-            music(kb, lambda: a.gain)
+            music(kb, lambda: dict(style=a.style, gain=a.gain, colors=colors))
         except KeyboardInterrupt:
             pass  # the keyboard goes back to its saved effect by itself
 
@@ -320,11 +383,28 @@ def selftest():
     assert ioc(0x06, 65) == 0xC0414806
     lp = live_packet({2: (4, 5, 6), 1: (1, 2, 3)})
     assert len(lp) == 512 and lp[:8] == b"\x01\x01\x02\x03\x02\x04\x05\x06" and lp[8:] == bytes(504)
-    cols = key_columns()
-    assert len(cols) == len(KEYS) and cols[KEYS["esc"]] == 0 and cols[KEYS["delete"]] == 1
-    assert all(c == (0, 0, 0) for c in vu_colors(0, cols).values())
-    full = vu_colors(1.01, cols)
-    assert full[KEYS["esc"]] == (0, 255, 0) and full[KEYS["delete"]] == (255, 0, 0)
+    grid = key_grid()
+    assert len(grid) == len(KEYS) and grid[KEYS["esc"]] == (0, 0) and grid[KEYS["right"]] == (1, 1)
+    assert grad(0) == (0, 255, 0) and grad(1) == (255, 0, 0) and grad(0.5, ((0, 0, 0), (200, 100, 50))) == (100, 50, 25)
+    assert grad(0, "rainbow") == (255, 0, 0)
+    off = (0, 0, 0)
+    assert all(c == off for st in ("meter", "center") for c in render(st, grid, None, 0).values())
+    m = render("meter", grid, None, 1.01)
+    assert m[KEYS["esc"]] == (0, 255, 0) and m[KEYS["delete"]] == (255, 0, 0)
+    c = render("center", grid, None, 0.3)
+    assert c[KEYS["esc"]] == off and c[KEYS["delete"]] == off and c[KEYS["t"]] != off
+    sp = render("spectrum", grid, None, bands=[1.0] + [0.0] * (BANDS - 1))
+    assert sp[KEYS["lctrl"]] != off and sp[KEYS["esc"]] != off and sp[KEYS["right"]] == off
+    assert all(v == (0, 127, 0) for v in render("pulse", grid, None, pulse=(0.5, 0)).values())
+    import math
+    try:
+        import numpy  # optional dependency, only the spectrum style uses it
+    except ImportError:
+        numpy = None
+    if numpy:
+        tone = array.array("h", (int(20000 * math.sin(2 * math.pi * 1000 * n / 44100)) for n in range(4096))).tobytes()
+        b = spectrum(tone)
+        assert len(b) == BANDS and b.index(max(b)) == next(i for i in range(BANDS) if 40 * 400 ** ((i + 1) / BANDS) > 1000)
     assert rms(b"") == 0 and abs(rms(array.array("h", [32767, -32767]).tobytes()) - 1) < 0.001
     print("selftest ok")
 
