@@ -7,7 +7,7 @@ Protocol recovered from the vendor's DeviceDriver.exe v1.0.0.5:
 """
 import argparse, array, colorsys, fcntl, glob, os, select, subprocess, sys, time
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 VID_PIDS = {(0x0C45, 0x8009), (0x0C45, 0x800A)}
 DELAY = 0.035  # <cmd_delaytime value="35"/> from the vendor's rgb-keyboard.xml
@@ -304,6 +304,17 @@ def hexrgb(s):
     return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))
 
 
+def palette(s):
+    """--colors value -> grad() colors: classic -> None, rainbow, or RRGGBB-RRGGBB -> pair of rgb."""
+    if s in ("classic", "rainbow"):
+        return None if s == "classic" else s
+    try:
+        c1, c2 = s.split("-")
+        return hexrgb(c1), hexrgb(c2)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{s!r}: use classic, rainbow or RRGGBB-RRGGBB")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", action="version", version=__version__)
@@ -329,7 +340,7 @@ def main():
     mu.add_argument("--style", choices=STYLES, default="meter",
                     help="meter: fills left->right, center: fills outwards, spectrum: equalizer (needs numpy), "
                          "pulse: whole keyboard flashes on beats")
-    mu.add_argument("--colors", default="classic",
+    mu.add_argument("--colors", type=palette, default="classic",
                     help="classic (green->yellow->red), rainbow, or two colors RRGGBB-RRGGBB")
     sub.add_parser("selftest", help="check packet builders (no keyboard needed)")
     a = ap.parse_args()
@@ -360,9 +371,8 @@ def main():
     elif a.cmd == "time":
         kb.sync_time()
     elif a.cmd == "music":
-        colors = {"classic": None, "rainbow": "rainbow"}.get(a.colors) or tuple(map(hexrgb, a.colors.split("-")))
         try:
-            music(kb, lambda: dict(style=a.style, gain=a.gain, colors=colors))
+            music(kb, lambda: dict(style=a.style, gain=a.gain, colors=a.colors))
         except KeyboardInterrupt:
             pass  # the keyboard goes back to its saved effect by itself
 
@@ -387,6 +397,14 @@ def selftest():
     assert len(grid) == len(KEYS) and grid[KEYS["esc"]] == (0, 0) and grid[KEYS["right"]] == (1, 1)
     assert grad(0) == (0, 255, 0) and grad(1) == (255, 0, 0) and grad(0.5, ((0, 0, 0), (200, 100, 50))) == (100, 50, 25)
     assert grad(0, "rainbow") == (255, 0, 0)
+    assert palette("classic") is None and palette("rainbow") == "rainbow"
+    assert palette("ff0080-00ffff") == ((255, 0, 128), (0, 255, 255))
+    for bad in ("red", "ff0000", "ff0000-00ff", "zzzzzz-000000"):
+        try:
+            palette(bad)
+            raise AssertionError(bad)
+        except argparse.ArgumentTypeError:
+            pass
     off = (0, 0, 0)
     assert all(c == off for st in ("meter", "center") for c in render(st, grid, None, 0).values())
     m = render("meter", grid, None, 1.01)
