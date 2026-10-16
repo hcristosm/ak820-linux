@@ -11,8 +11,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QColorDial
 
 import ak820
 
-# keyboard drawing: rows break after these keys; widths in key units (default 1)
-ROW_ENDS = {"delete", "home", "pgup", "pgdn", "up", "right"}
+# keyboard drawing: rows break after ak820.ROW_ENDS; widths in key units (default 1)
 WIDTH = dict(backspace=2, tab=1.5, backslash=1.5, capslock=1.75, enter=2.25, lshift=2.25, rshift=1.75,
              lctrl=1.25, win=1.25, lalt=1.25, space=6.25)
 LABEL = dict(grave="`", minus="-", equal="=", lbracket="[", rbracket="]", backslash="\\", semicolon=";",
@@ -134,7 +133,7 @@ class App(QMainWindow):
         pal.setColor(QPalette.Button, QColor(BG))
         pal.setColor(QPalette.ButtonText, QColor(FG))
         app.setPalette(pal)
-        self.busy, self.lighting = False, "effect"
+        self.busy, self.lighting, self.music_stop, self.music_gain = False, "effect", None, 1.0
         self.cfg_path, self.cfg = cfg_path, load_config(cfg_path)
         if not isinstance(self.cfg.get("profiles"), dict):
             self.cfg["profiles"] = {}
@@ -150,7 +149,8 @@ class App(QMainWindow):
                 ("✦  Effects", "Effects", self.fill_effects, "Apply", self.apply_effect),
                 ("⌨  Per-key colors", "Per-key colors", self.fill_keys, "Apply", self.apply_keys),
                 ("▣  Screen", "Screen", self.fill_screen, "Send to screen", self.apply_screen),
-                ("◷  Clock", "Clock", self.fill_clock, "Sync now", self.sync_clock)):
+                ("◷  Clock", "Clock", self.fill_clock, "Sync now", self.sync_clock),
+                ("♫  Music", "Music", self.fill_music, "Start", self.toggle_music)):
             self.nav.addItem(nav)
             self.stack.addWidget(self.page(title, fill, action, slot))
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
@@ -233,6 +233,8 @@ class App(QMainWindow):
         save_config(self.cfg, self.cfg_path)
 
     def closeEvent(self, e):
+        if self.music_stop:
+            self.music_stop.set()
         self.persist()
         super().closeEvent(e)
 
@@ -293,6 +295,9 @@ class App(QMainWindow):
         threading.Thread(target=work, daemon=True).start()
 
     def finish(self, msg):
+        if self.music_stop:
+            self.music_stop = None
+            self.music_btn.setText("Start")
         self.busy = False
         self.bar.setValue(100)
         self.say(msg)
@@ -383,7 +388,7 @@ class App(QMainWindow):
             self.keys[name] = b
             self.paint_key(name, (0, 0, 0))
             x += w
-            if name in ROW_ENDS:
+            if name in ak820.ROW_ENDS:
                 x, y = 0, y + U
         v.addWidget(QLabel("Click a key to paint it with the brush color.", objectName="muted"))
 
@@ -471,6 +476,24 @@ class App(QMainWindow):
     def sync_clock(self):
         self.run("Clock", lambda kb: kb.sync_time())
 
+    # --- Music ---
+    def fill_music(self, v):
+        v.addWidget(QLabel("Lights the keys as a level meter of whatever this computer is playing.\n"
+                           "Your saved effect comes back by itself when you stop.", objectName="muted"))
+        s, n = slider(2)
+        s.valueChanged.connect(lambda x: setattr(self, "music_gain", (x + 1) / 3))  # 0..5 -> 0.33..2
+        v.addLayout(hbox(QLabel("Sensitivity"), s, n))
+
+    def toggle_music(self):
+        if self.music_stop:
+            return self.music_stop.set()
+        if self.busy:
+            return
+        self.music_btn, stop = self.sender(), threading.Event()
+        self.music_stop = stop
+        self.music_btn.setText("Stop")
+        self.run("Music", lambda kb: ak820.music(kb, lambda: self.music_gain, stop.is_set))
+
 
 def selftest():
     """Settings survive close + reopen, bad inputs don't crash (temp config, no keyboard, no window)."""
@@ -504,6 +527,23 @@ def selftest():
     finally:
         ak820.Kbd = real
     assert b.statusBar().currentMessage() == "Error: AK820 not found", b.statusBar().currentMessage()
+    # music: Start runs until Stop, then the button and busy flag reset
+    def fake_music(kb, gain, stop):
+        while not stop():
+            threading.Event().wait(0.01)
+    real_kbd, real_music = ak820.Kbd, ak820.music
+    ak820.Kbd = lambda: type("Kbd", (), dict(fd=os.open(os.devnull, os.O_RDONLY), lcd=None))()
+    ak820.music = fake_music
+    try:
+        btn = b.stack.widget(4).findChild(QPushButton, "accent")
+        btn.click()
+        assert btn.text() == "Stop" and b.busy
+        btn.click()
+        while b.busy:
+            app.processEvents()
+        assert btn.text() == "Start" and b.statusBar().currentMessage() == "Music: done."
+    finally:
+        ak820.Kbd, ak820.music = real_kbd, real_music
     b.close()
     # a corrupted config is kept aside and the app starts with defaults
     with open(path, "w") as f:

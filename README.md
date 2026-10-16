@@ -7,6 +7,7 @@ without the vendor's Windows-only software.
 - per-key static colors
 - upload an image or animated GIF (up to 140 frames) to the screen
 - sync the screen clock to your PC
+- music mode: the keys become a level meter of whatever your PC is playing
 - command line tool and a small GUI with saved profiles
 
 Unofficial project. Not affiliated with or endorsed by AJAZZ.
@@ -29,6 +30,8 @@ sudo dnf install python3-pyside6 python3-pillow                 # Fedora
 sudo apt install python3-pyside6.qtwidgets python3-pil          # Debian 13+ / Ubuntu 24.10+
 pip install --user PySide6 pillow                               # anything else
 ```
+
+Music mode also needs `parec` (package `pulseaudio-utils`; works with PipeWire too).
 
 Prefer a lighter GUI without Qt? The Tkinter version lives on the
 [`tk-gui`](https://github.com/hcristosm/ak820-linux/tree/tk-gui) branch.
@@ -56,7 +59,7 @@ You can also run `./ak820.py` or `./ak820_gui.py` straight from the cloned folde
 GUI: open **AJAZZ AK820 Pro** from the app menu, or run `ak820-gui`.
 
 - sidebar with Effects (pick one from the gallery), Per-key colors (click keys to paint them),
-  Screen (with preview) and Clock
+  Screen (with preview), Clock and Music (Start/Stop, sensitivity)
 - settings are remembered between runs, in `~/.config/ak820/config.json`
 - **Profile** (bottom of the sidebar): type a name and Save; Load fills in the pages and applies the profile's lighting
   (the screen image is remembered but not re-sent, since uploads take a few seconds); Delete asks first
@@ -70,6 +73,7 @@ ak820 keys --all 101010 w=ff0000 a=ff0000 s=ff0000 d=ff0000
 ak820 keys --list                             # key names
 ak820 screen picture.gif                      # also png/jpg; --fit pad keeps the whole image
 ak820 time                                    # sync the clock
+ak820 music -g 1.5                            # level meter of the system audio until Ctrl-C; -g = sensitivity
 ak820 --version
 ```
 
@@ -98,6 +102,7 @@ after each header (`04 18` answers `04 18 00 01`).
 | `13` | lighting effect | 1 packet: `[0]` mode, `[1..3]` R G B, `[8]` rainbow, `[9]` brightness 0-5, `[10]` speed 0-5, `[11]` direction, `[14..15]` `AA 55` |
 | `13` + `23` | per-key colors | mode `0x80` with `[9]` brightness, then 9 packets: 144 × (index, R, G, B), last two bytes `AA 55` |
 | `72` | screen | `[2]` slot (1), `[8..9]` number of 4 KiB chunks; payload = 256-byte header (frame count, then one delay per frame in 2 ms units, padded with `FF`) + frames as 128×128 little-endian RGB565, padded with `FF` to 4 KiB |
+| `20` | live per-key colors (music mode) | no `04 18`/`04 F0`, not saved: header byte 8 = 8, then 512 bytes of consecutive (index, R, G, B) entries, then `04 02`. Vendor waits 5 ms around headers and 2 ms between data packets. When frames stop, the keyboard returns to its saved effect by itself |
 | `28` | clock | `[1]` 1, `[2]` `5A`, `[3..8]` year−2000, month, day, hour, minute, second, `[10]` weekday (Sunday = 0), `[62..63]` `AA 55` |
 
 Mode numbers and per-key indices come from the vendor's default effect table and `rgb-keyboard.xml`;
@@ -105,7 +110,8 @@ both are in `ak820.py`.
 
 ## Not implemented
 
-Key remapping, macros, the music-reactive lighting mode, and wireless (2.4 GHz) mode.
+Key remapping, macros, and wireless (2.4 GHz) mode. The music mode is a simple level meter, not the
+vendor's spectrum styles.
 
 ## License
 

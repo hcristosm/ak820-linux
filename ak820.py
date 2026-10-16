@@ -5,7 +5,7 @@ Protocol recovered from the vendor's DeviceDriver.exe v1.0.0.5:
   - commands: 64-byte HID feature reports on the vendor interface (usage page 0xff13)
   - screen data: 4096-byte output reports on the vendor interface (usage page 0xff68)
 """
-import argparse, fcntl, glob, os, select, sys, time
+import argparse, array, fcntl, glob, os, select, subprocess, sys, time
 
 __version__ = "0.2.0"
 
@@ -38,6 +38,7 @@ KEYS = dict(
     lshift=73, z=74, x=75, c=76, v=77, b=78, n=79, m=80, comma=81, period=82, slash=83, rshift=84, up=101,
     lctrl=91, win=92, lalt=93, space=94, ralt=95, fn=96, rctrl=98, left=99, down=100, right=102,
 )
+ROW_ENDS = {"delete", "home", "pgup", "pgdn", "up", "right"}  # last key of each row, in KEYS order
 
 
 def ioc(nr, size):  # _IOC(_IOC_READ|_IOC_WRITE, 'H', nr, size)
@@ -61,22 +62,22 @@ class Kbd:
         self.fd = os.open(find_hidraw(0xFF13), os.O_RDWR)
         self.lcd = None
 
-    def feature(self, data, readback=True):
+    def feature(self, data, readback=True, delay=DELAY):
         """Mirrors the vendor's send routine: sleep, SetFeature(65 bytes), sleep, GetFeature."""
         for off in range(0, len(data), 64):
-            time.sleep(DELAY)
+            time.sleep(delay)
             fcntl.ioctl(self.fd, ioc(0x06, 65), b"\0" + data[off:off + 64].ljust(64, b"\0"))
             if readback:
-                time.sleep(DELAY)
+                time.sleep(delay)
                 fcntl.ioctl(self.fd, ioc(0x07, 65), bytearray(65))
 
-    def cmd(self, op, count=0, extra=b"", readback=True):
+    def cmd(self, op, count=0, extra=b"", readback=True, delay=DELAY):
         """0x04 <op> header; byte 8 (and 9) = number of 64-byte (or 4 KiB) data packets that follow."""
         p = bytearray(64)
         p[0], p[1] = 0x04, op
         p[2:2 + len(extra)] = extra
         p[8], p[9] = count & 0xFF, count >> 8
-        self.feature(bytes(p), readback)
+        self.feature(bytes(p), readback, delay)
 
     def lcd_write(self, chunk):
         if self.lcd is None:
@@ -113,6 +114,12 @@ class Kbd:
             progress(i + 1, n)
         self.cmd(0x02)
 
+    def live(self, colors):
+        """One real-time frame, as the vendor's music page sends it: no session, not saved to flash."""
+        self.cmd(0x20, 8, delay=0.005)
+        self.feature(live_packet(colors), readback=False, delay=0.002)
+        self.cmd(0x02, delay=0.005)
+
     def sync_time(self):
         self.cmd(0x18)
         self.cmd(0x28, 1)
@@ -137,6 +144,61 @@ def keys_packet(colors):
         p[idx * 4:idx * 4 + 4] = bytes([idx, r, g, b])
     p[0x23E:0x240] = b"\xaa\x55"
     return bytes(p)
+
+
+def live_packet(colors):
+    """colors: {light_index: (r,g,b)} -> 512 bytes of consecutive (index, r, g, b) entries, at most 128."""
+    return b"".join(bytes([i, *rgb]) for i, rgb in sorted(colors.items())[:128]).ljust(512, b"\0")
+
+
+def key_columns():
+    """light_index -> horizontal position 0..1 in its row."""
+    # ponytail: rank in the row, not physical position (space counts as one key); use key widths if it looks off
+    rows, row = [], []
+    for name, idx in KEYS.items():
+        row.append(idx)
+        if name in ROW_ENDS:
+            rows.append(row)
+            row = []
+    return {idx: i / (len(r) - 1) for r in rows for i, idx in enumerate(r)}
+
+
+def vu_colors(level, columns):
+    """Level meter: keys left of `level` (0..1) light green -> yellow -> red, the rest are off."""
+    return {i: (min(255, int(510 * x)), min(255, int(510 * (1 - x))), 0) if x < level else (0, 0, 0)
+            for i, x in columns.items()}
+
+
+def rms(pcm):
+    """Loudness 0..1 of signed 16-bit little-endian mono samples."""
+    a = array.array("h", pcm[len(pcm) % 2:])
+    return (sum(v * v for v in a) / len(a)) ** 0.5 / 32768 if a else 0.0
+
+
+def music(kb, gain=lambda: 1.0, stop=lambda: False):
+    """Light the keyboard as a level meter of whatever the system is playing, until stop() is true."""
+    try:
+        rec = subprocess.Popen(["parec", "--device=@DEFAULT_MONITOR@", "--format=s16le", "--rate=44100",
+                                "--channels=1", "--latency-msec=20", "--raw"], stdout=subprocess.PIPE)
+    except FileNotFoundError:
+        sys.exit("music needs parec (Fedora: pulseaudio-utils, Debian/Ubuntu: pulseaudio-utils)")
+    fd, buf, peak, shown, cols = rec.stdout.fileno(), b"", 0.05, 0.0, key_columns()
+    os.set_blocking(fd, False)
+    try:
+        while not stop():
+            try:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    sys.exit("parec stopped (no audio server?)")
+                buf = (buf + chunk)[-2048:]  # newest ~23 ms; older audio is already stale
+            except BlockingIOError:
+                pass
+            level = rms(buf)
+            peak = max(level, peak * 0.995, 0.01)  # auto gain: follows the loudest recent moment
+            shown = max(min(1.0, level / peak * gain()), shown * 0.8)  # fast attack, smooth fall
+            kb.live(vu_colors(shown, cols))  # ~60 ms per frame paces the loop
+    finally:
+        rec.terminate()
 
 
 def time_packet(t, slot=1):
@@ -205,6 +267,8 @@ def main():
     s.add_argument("image")
     s.add_argument("--fit", choices=["crop", "pad"], default="crop")
     sub.add_parser("time", help="sync the screen clock to this PC")
+    mu = sub.add_parser("music", help="level meter of the system audio on the keys, until Ctrl-C")
+    mu.add_argument("-g", "--gain", type=float, default=1.0, help="sensitivity (default 1.0)")
     sub.add_parser("selftest", help="check packet builders (no keyboard needed)")
     a = ap.parse_args()
 
@@ -233,6 +297,11 @@ def main():
         print()
     elif a.cmd == "time":
         kb.sync_time()
+    elif a.cmd == "music":
+        try:
+            music(kb, lambda: a.gain)
+        except KeyboardInterrupt:
+            pass  # the keyboard goes back to its saved effect by itself
 
 
 def selftest():
@@ -249,6 +318,14 @@ def selftest():
     b = screen_blob([(b"\0" * W * H * 2, 100)] * 2)
     assert len(b) == 69632 and b[0] == 2 and b[1:3] == b"\x32\x32" and b[3] == 0xFF and b[-1] == 0xFF
     assert ioc(0x06, 65) == 0xC0414806
+    lp = live_packet({2: (4, 5, 6), 1: (1, 2, 3)})
+    assert len(lp) == 512 and lp[:8] == b"\x01\x01\x02\x03\x02\x04\x05\x06" and lp[8:] == bytes(504)
+    cols = key_columns()
+    assert len(cols) == len(KEYS) and cols[KEYS["esc"]] == 0 and cols[KEYS["delete"]] == 1
+    assert all(c == (0, 0, 0) for c in vu_colors(0, cols).values())
+    full = vu_colors(1.01, cols)
+    assert full[KEYS["esc"]] == (0, 255, 0) and full[KEYS["delete"]] == (255, 0, 0)
+    assert rms(b"") == 0 and abs(rms(array.array("h", [32767, -32767]).tobytes()) - 1) < 0.001
     print("selftest ok")
 
 
