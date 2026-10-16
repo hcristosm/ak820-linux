@@ -12,6 +12,8 @@ without the vendor's Windows-only software.
 
 Unofficial project. Not affiliated with or endorsed by AJAZZ.
 
+![Effects page of the GUI](docs/screenshots/effects.png)
+
 ## Tested hardware
 
 | Device | USB ID | Status |
@@ -64,6 +66,10 @@ GUI: open **AJAZZ AK820 Pro** from the app menu, or run `ak820-gui`.
 - settings are remembered between runs, in `~/.config/ak820/config.json`
 - **Profile** (bottom of the sidebar): type a name and Save; Load fills in the pages and applies the profile's lighting
   (the screen image is remembered but not re-sent, since uploads take a few seconds); Delete asks first
+
+| Per-key colors | Screen | Music |
+|---|---|---|
+| ![Per-key colors page](docs/screenshots/per-key.png) | ![Screen page](docs/screenshots/screen.png) | ![Music page](docs/screenshots/music.png) |
 
 Command line:
 

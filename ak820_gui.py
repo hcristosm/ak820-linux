@@ -505,8 +505,10 @@ class App(QMainWindow):
         form = QGridLayout(card(v))
         form.setContentsMargins(18, 16, 18, 16)
         form.setVerticalSpacing(12)
+        colors_row = hbox(*self.music_pal.buttons(), *self.music_swatches)
+        colors_row.setSpacing(12)  # radio labels otherwise touch the next indicator
         for r, (txt, row) in enumerate((("Style", hbox(*self.music_style.buttons())),
-                                        ("Colors", hbox(*self.music_pal.buttons(), *self.music_swatches)),
+                                        ("Colors", colors_row),
                                         ("Sensitivity", hbox(self.music_sens, n)))):
             form.addWidget(QLabel(txt), r, 0)
             form.addLayout(row, r, 1)
