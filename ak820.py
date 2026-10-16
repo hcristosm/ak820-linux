@@ -7,7 +7,7 @@ Protocol recovered from the vendor's DeviceDriver.exe v1.0.0.5:
 """
 import argparse, array, colorsys, fcntl, glob, os, select, subprocess, sys, time
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 VID_PIDS = {(0x0C45, 0x8009), (0x0C45, 0x800A)}
 DELAY = 0.035  # <cmd_delaytime value="35"/> from the vendor's rgb-keyboard.xml
