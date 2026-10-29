@@ -30,8 +30,15 @@ Needs Python 3 with PySide6 (Qt 6) and Pillow:
 ```sh
 sudo dnf install python3-pyside6 python3-pillow                 # Fedora
 sudo apt install python3-pyside6.qtwidgets python3-pil          # Debian 13+ / Ubuntu 24.10+
+sudo apt install python3-pip python3-pil libxcb-cursor0         # Ubuntu 24.04 / Linux Mint 22 (no PySide6 package),
+pip install --user --break-system-packages PySide6              #   then PySide6 from pip
 pip install --user PySide6 pillow                               # anything else
 ```
+
+A PySide6 from pip (Qt 6.5+) needs `libxcb-cursor0` (Debian/Ubuntu) or `xcb-util-cursor` (Fedora/Arch) to open
+its window on X11; without it the GUI quits with `Could not load the Qt platform plugin "xcb"`. Ubuntu 24.04
+refuses `pip install` outside a virtualenv unless you pass `--break-system-packages`; with `--user` it only
+writes to `~/.local`, not to the system's Python.
 
 Music mode also needs `parec` (package `pulseaudio-utils`; works with PipeWire too), and its spectrum style
 needs numpy (`python3-numpy`).
