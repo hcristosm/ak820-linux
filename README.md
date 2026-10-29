@@ -57,7 +57,7 @@ cd ak820-linux-0.3.1
 (or `git clone https://github.com/hcristosm/ak820-linux` for the latest code.)
 
 `install.sh` copies the program to `~/.local/share/ak820`, adds `ak820` and `ak820-gui` to `~/.local/bin`,
-creates an "AJAZZ AK820 Pro" entry in the app menu, and installs a udev rule (asks for sudo once) so your
+creates an "AJAZZ AK820 Pro" entry in the app menu, and installs a udev rule (asks for your password once) so your
 user can open the keyboard's hidraw devices. Unplug and replug the keyboard if you still get a permission
 error. `./install.sh --uninstall` removes everything.
 

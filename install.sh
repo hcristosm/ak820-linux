@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install ak820 for the current user (the udev rule needs sudo once).  ./install.sh --uninstall removes it.
+# Install ak820 for the current user (the udev rule asks for your password once).  ./install.sh --uninstall removes it.
 set -e
 SRC=$(cd "$(dirname "$0")" && pwd)
 DEST="$HOME/.local/share/ak820"
@@ -34,12 +34,7 @@ sed "s|@DEST@|$DEST|g" "$SRC/ak820.desktop" > "$APPS/ak820.desktop"
 # KDE caches menu entries and may keep launching an old Exec path until the cache is rebuilt
 for c in kbuildsycoca6 kbuildsycoca5; do command -v $c >/dev/null && $c >/dev/null 2>&1 && break; done || true
 
-if ! cmp -s "$SRC/70-ak820.rules" "$RULE"; then
-    sudo install -m 644 "$SRC/70-ak820.rules" "$RULE"
-    sudo udevadm control --reload
-    sudo udevadm trigger --subsystem-match=hidraw
-    echo "udev rule installed. If access is still denied, unplug and replug the keyboard."
-fi
+cmp -s "$SRC/70-ak820.rules" "$RULE" || python3 "$SRC/ak820.py" setup
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *) echo "~/.local/bin is not on your PATH yet; log out and back in to use the ak820 commands." ;;
