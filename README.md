@@ -8,7 +8,6 @@
 No Windows, no vendor software: one download that runs on most distros.
 
 [![Latest release](https://img.shields.io/github/v/release/hcristosm/ak820-linux?label=release)](https://github.com/hcristosm/ak820-linux/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/hcristosm/ak820-linux/total)](https://github.com/hcristosm/ak820-linux/releases)
 [![License: MIT](https://img.shields.io/github/license/hcristosm/ak820-linux)](LICENSE)
 
 ![Effects page of the GUI](docs/screenshots/effects.png)
