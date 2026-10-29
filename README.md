@@ -65,8 +65,8 @@ Prefer a lighter GUI without Qt? The Tkinter version lives on the
 Then download the [latest release](https://github.com/hcristosm/ak820-linux/releases/latest) and run the installer:
 
 ```sh
-curl -L https://github.com/hcristosm/ak820-linux/archive/refs/tags/v0.3.1.tar.gz | tar xz
-cd ak820-linux-0.3.1
+curl -L https://github.com/hcristosm/ak820-linux/archive/refs/tags/v0.3.2.tar.gz | tar xz
+cd ak820-linux-0.3.2
 ./install.sh
 ```
 
