@@ -7,7 +7,7 @@ Protocol recovered from the vendor's DeviceDriver.exe v1.0.0.5:
 """
 import argparse, array, colorsys, fcntl, glob, os, select, shutil, subprocess, sys, time
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 VID_PIDS = {(0x0C45, 0x8009), (0x0C45, 0x800A)}
 # same text as 70-ak820.rules (selftest checks), so a packaged copy without that file can still install it
