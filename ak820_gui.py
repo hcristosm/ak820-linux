@@ -120,7 +120,7 @@ def swatch(btn, rgb):
 
 
 class App(QMainWindow):
-    done, progress = Signal(str), Signal(int)  # worker thread -> UI
+    done, progress, denied = Signal(str), Signal(int), Signal(str)  # worker thread -> UI
 
     def __init__(self, cfg_path=CONFIG):
         super().__init__()
@@ -177,6 +177,7 @@ class App(QMainWindow):
         self.bar = QProgressBar(textVisible=False)
         self.statusBar().addPermanentWidget(self.bar)
         self.done.connect(self.finish)
+        self.denied.connect(self.offer_setup)
         self.progress.connect(self.bar.setValue)
         self.say("Ready.")
         self.refresh_profiles()
@@ -297,7 +298,28 @@ class App(QMainWindow):
                     os.close(kb.fd)
                     kb.lcd is not None and os.close(kb.lcd)
                 msg = label + ": done."
+            except ak820.NoPermission as e:
+                return self.denied.emit(str(e))
             except (SystemExit, Exception) as e:  # find_hidraw exits with a message when the keyboard is missing
+                msg = f"Error: {e}"
+            self.done.emit(msg)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def offer_setup(self, msg):
+        self.finish(f"Error: {msg}")
+        if QMessageBox.question(self, "Keyboard access",
+                                "Your user is not allowed to open the keyboard yet.\n\nInstall the udev rule that "
+                                "allows it? You will be asked for your password.") != QMessageBox.Yes:
+            return
+        self.busy = True
+        self.say("Setting up keyboard access…")
+
+        def work():
+            try:
+                ak820.setup()
+                msg = "Keyboard access set up. Try again (unplug and replug the keyboard if it still fails)."
+            except (SystemExit, Exception) as e:
                 msg = f"Error: {e}"
             self.done.emit(msg)
 
@@ -580,6 +602,22 @@ def selftest():
     finally:
         ak820.Kbd = real
     assert b.statusBar().currentMessage() == "Error: AK820 not found", b.statusBar().currentMessage()
+    # no permission: setup is offered; declining leaves the error shown, accepting runs ak820.setup
+    def denied():
+        raise ak820.NoPermission("no permission to open /dev/hidraw7")
+    asked, ran = [], []
+    real_q, real_setup = QMessageBox.question, ak820.setup
+    ak820.Kbd, ak820.setup = denied, lambda: ran.append(1)
+    try:
+        for n, answer in enumerate((QMessageBox.No, QMessageBox.Yes), 1):
+            QMessageBox.question = lambda *a, answer=answer: asked.append(1) or answer
+            b.run("Clock", lambda kb: None)
+            while len(asked) < n or b.busy:
+                app.processEvents()
+    finally:
+        ak820.Kbd, ak820.setup, QMessageBox.question = real, real_setup, real_q
+    assert asked == [1, 1] and ran == [1], (asked, ran)
+    assert b.statusBar().currentMessage().startswith("Keyboard access set up"), b.statusBar().currentMessage()
     # music: Start runs until Stop, then the button and busy flag reset
     def fake_music(kb, opts, stop):
         assert opts()["style"] in ak820.STYLES

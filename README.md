@@ -61,8 +61,9 @@ creates an "AJAZZ AK820 Pro" entry in the app menu, and installs a udev rule (as
 user can open the keyboard's hidraw devices. Unplug and replug the keyboard if you still get a permission
 error. `./install.sh --uninstall` removes everything.
 
-You can also run `./ak820.py` or `./ak820_gui.py` straight from the cloned folder once the udev rule
-(`70-ak820.rules`) is installed.
+You can also run `./ak820.py` or `./ak820_gui.py` straight from the cloned folder. Without the udev rule
+(`70-ak820.rules`), `ak820 setup` installs it (asks for your password), and the GUI offers to do the same
+the first time it can't open the keyboard.
 
 ## Usage
 
@@ -90,6 +91,7 @@ ak820 time                                    # sync the clock
 ak820 music -g 1.5                            # react to the system audio until Ctrl-C; -g = sensitivity
 ak820 music --style spectrum --colors rainbow # styles: meter center spectrum pulse
 ak820 music --style pulse --colors ff0080-00ffff   # colors: classic, rainbow, or two colors
+ak820 setup                                   # install the udev rule (only needed once)
 ak820 --version
 ```
 

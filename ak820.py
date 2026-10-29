@@ -5,11 +5,16 @@ Protocol recovered from the vendor's DeviceDriver.exe v1.0.0.5:
   - commands: 64-byte HID feature reports on the vendor interface (usage page 0xff13)
   - screen data: 4096-byte output reports on the vendor interface (usage page 0xff68)
 """
-import argparse, array, colorsys, fcntl, glob, os, select, subprocess, sys, time
+import argparse, array, colorsys, fcntl, glob, os, select, shutil, subprocess, sys, time
 
 __version__ = "0.3.1"
 
 VID_PIDS = {(0x0C45, 0x8009), (0x0C45, 0x800A)}
+# same text as 70-ak820.rules (selftest checks), so a packaged copy without that file can still install it
+RULE_PATH = "/etc/udev/rules.d/70-ak820.rules"
+UDEV_RULE = "# AJAZZ AK820 Pro: let the logged-in user open its hidraw nodes (used by ak820.py)\n" + "".join(
+    f'KERNEL=="hidraw*", ATTRS{{idVendor}}=="{v:04x}", ATTRS{{idProduct}}=="{p:04x}", TAG+="uaccess"\n'
+    for v, p in sorted(VID_PIDS))
 DELAY = 0.035  # <cmd_delaytime value="35"/> from the vendor's rgb-keyboard.xml
 W = H = 128    # <screen width="128" height="128" gif_headlength="256" gif_maxframes="140"/>
 HEAD, MAX_FRAMES, CHUNK = 256, 140, 4096
@@ -57,9 +62,32 @@ def find_hidraw(usage_page):
     sys.exit(f"AK820 interface 0x{usage_page:04x} not found (USB cable plugged in? udev rule installed?)")
 
 
+class NoPermission(SystemExit):
+    """The keyboard is there but this user may not open it; exits like sys.exit, the GUI catches it to offer setup."""
+
+
+def open_hidraw(usage_page):
+    path = find_hidraw(usage_page)
+    try:
+        return os.open(path, os.O_RDWR)
+    except PermissionError:
+        raise NoPermission(f"no permission to open {path}; run 'ak820 setup' once to allow your user")
+
+
+def setup():
+    """Install UDEV_RULE and apply it to the plugged-in keyboard. Asks for the password via pkexec (sudo without it)."""
+    script = ('cat > "$1" && chmod 644 "$1" && udevadm control --reload && '
+              'udevadm trigger --subsystem-match=hidraw && udevadm settle')
+    cmd = ["sh", "-c", script, "sh", RULE_PATH]
+    if os.geteuid():
+        cmd = (["pkexec"] if shutil.which("pkexec") else ["sudo"]) + cmd
+    if subprocess.run(cmd, input=UDEV_RULE.encode()).returncode:
+        sys.exit("udev rule not installed (password dialog cancelled?)")
+
+
 class Kbd:
     def __init__(self):
-        self.fd = os.open(find_hidraw(0xFF13), os.O_RDWR)
+        self.fd = open_hidraw(0xFF13)
         self.lcd = None
 
     def feature(self, data, readback=True, delay=DELAY):
@@ -81,7 +109,7 @@ class Kbd:
 
     def lcd_write(self, chunk):
         if self.lcd is None:
-            self.lcd = os.open(find_hidraw(0xFF68), os.O_RDWR)
+            self.lcd = open_hidraw(0xFF68)
         os.write(self.lcd, b"\0" + chunk)
         if select.select([self.lcd], [], [], 0.3)[0]:  # vendor waits up to 300 ms for an ack
             os.read(self.lcd, 64)
@@ -342,11 +370,15 @@ def main():
                          "pulse: whole keyboard flashes on beats")
     mu.add_argument("--colors", type=palette, default="classic",
                     help="classic (green->yellow->red), rainbow, or two colors RRGGBB-RRGGBB")
+    sub.add_parser("setup", help="allow your user to open the keyboard (installs a udev rule, asks for your password)")
     sub.add_parser("selftest", help="check packet builders (no keyboard needed)")
     a = ap.parse_args()
 
     if a.cmd == "selftest":
         return selftest()
+    if a.cmd == "setup":
+        setup()
+        return print(f"Installed {RULE_PATH}. If access is still denied, unplug and replug the keyboard.")
     if a.cmd == "keys" and a.list:
         return print(" ".join(KEYS))
 
@@ -391,6 +423,8 @@ def selftest():
     b = screen_blob([(b"\0" * W * H * 2, 100)] * 2)
     assert len(b) == 69632 and b[0] == 2 and b[1:3] == b"\x32\x32" and b[3] == 0xFF and b[-1] == 0xFF
     assert ioc(0x06, 65) == 0xC0414806
+    rules = os.path.join(os.path.dirname(os.path.realpath(__file__)), "70-ak820.rules")
+    assert not os.path.exists(rules) or open(rules).read() == UDEV_RULE
     lp = live_packet({2: (4, 5, 6), 1: (1, 2, 3)})
     assert len(lp) == 512 and lp[:8] == b"\x01\x01\x02\x03\x02\x04\x05\x06" and lp[8:] == bytes(504)
     grid = key_grid()
