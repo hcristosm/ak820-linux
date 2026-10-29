@@ -661,7 +661,7 @@ def selftest():
     print("gui selftest ok")
 
 
-if __name__ == "__main__":
+def main():
     if sys.argv[1:] == ["selftest"]:
         sys.exit(selftest())
     app = QApplication(sys.argv)
@@ -669,3 +669,7 @@ if __name__ == "__main__":
     w = App()
     w.show()
     sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

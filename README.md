@@ -23,6 +23,22 @@ Unofficial project. Not affiliated with or endorsed by AJAZZ.
 
 The 2.4 GHz dongle (`0c45:fdfd`) and Bluetooth are not supported. Connect the keyboard with the USB cable.
 
+## Download (any distro)
+
+The [latest release](https://github.com/hcristosm/ak820-linux/releases/latest) has an AppImage with Python, Qt
+and everything else inside. Nothing to install:
+
+```sh
+chmod +x ak820-*-x86_64.AppImage
+./ak820-*-x86_64.AppImage                          # GUI
+./ak820-*-x86_64.AppImage mode static -c 00ff88    # command line: same commands as ak820 below
+```
+
+The first time it can't open the keyboard, it offers to install the udev rule (asks for your password once);
+`./ak820-*-x86_64.AppImage setup` does the same from a terminal. Needs glibc 2.35 or newer (Ubuntu 22.04,
+Debian 12, Fedora 36, Linux Mint 21 or later). Music mode uses the system's `parec`. To build it yourself:
+`./appimage/build.sh`.
+
 ## Install
 
 Needs Python 3 with PySide6 (Qt 6) and Pillow:

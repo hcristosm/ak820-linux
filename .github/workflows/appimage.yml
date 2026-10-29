@@ -1,0 +1,32 @@
+name: AppImage
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:  # manual run: the AppImage is kept as a workflow artifact, no release
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # the oldest supported Ubuntu: the AppImage needs a glibc at least as new as the build machine's
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Qt's xcb plugin needs these; PyInstaller bundles them for distros that don't have them
+      - run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0 libxcb-icccm4 libxcb-image0
+          libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 libxkbcommon-x11-0
+      - run: ./appimage/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: build/*.AppImage
+      - if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" build/*.AppImage --clobber
