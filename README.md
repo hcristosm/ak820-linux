@@ -53,7 +53,7 @@ remembered but not re-sent, since uploads are slow); Delete asks first.
 | Distro | How | Version |
 |---|---|---|
 | Linux Mint 22.3 (Cinnamon) | AppImage and `install.sh` | 0.3.3 |
-| Fedora | `install.sh` | up to 0.3.1 |
+| Fedora | AppImage and `install.sh` | 0.3.3 |
 
 Tried it on another distro? [Open an issue](https://github.com/hcristosm/ak820-linux/issues) and say whether it
 worked, so this table can grow.
