@@ -13,11 +13,12 @@ rm -rf "$B" && mkdir -p "$B"
 python3 -m venv --without-pip "$B/venv"
 python3 -m pip --python "$B/venv/bin/python" install -q \
     pyinstaller==6.22.3 PySide6_Essentials==6.12.0 pillow numpy
-# shortcut: PyInstaller also bundles the build machine's GTK, X11 and libstdc++ (via Qt's gtk3 theme plugin and
-# others); if the AppImage breaks on some distro, delete that plugin and those libraries from the bundle
 "$B/venv/bin/pyinstaller" --noconfirm --log-level WARN --name ak820 \
     --distpath "$B/dist" --workpath "$B/work" --specpath "$B" \
     --paths "$SRC" --add-data "$SRC/ak820.png:." "$SRC/appimage/entry.py"
+# shortcut: libstdc++, X11 and xcb still come from the build machine; if the AppImage breaks on some distro,
+# add the offending library to prune.py's HOST list
+python3 "$SRC/appimage/prune.py" "$B/dist/ak820/_internal"
 
 A="$B/AppDir"
 mkdir -p "$A/usr/lib"
