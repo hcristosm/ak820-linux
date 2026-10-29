@@ -10,7 +10,8 @@ No Windows, no vendor software: one download that runs on most distros.
 [![Latest release](https://img.shields.io/github/v/release/hcristosm/ak820-linux?label=release)](https://github.com/hcristosm/ak820-linux/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/hcristosm/ak820-linux)](LICENSE)
 
-![Effects page of the GUI](docs/screenshots/effects.png)
+<img src="docs/screenshots/effects.png" height="320" alt="Effects page of the GUI">
+<img src="docs/keyboard-screen.gif" height="320" alt="A GIF sent with ak820, playing on the keyboard's screen">
 
 </div>
 
