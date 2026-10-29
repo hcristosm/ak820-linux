@@ -54,6 +54,8 @@ remembered but not re-sent, since uploads are slow); Delete asks first.
 |---|---|---|
 | Linux Mint 22.3 (Cinnamon) | AppImage and `install.sh` | 0.3.3 |
 | Fedora 44 (KDE Plasma, Wayland) | AppImage and `install.sh` | 0.3.3 |
+| Ubuntu 26.04 LTS (GNOME) | AppImage and `install.sh` | 0.3.3 |
+| Debian 13 (GNOME) | AppImage and `install.sh` | 0.3.3 |
 
 Tried it on another distro? [Open an issue](https://github.com/hcristosm/ak820-linux/issues) and say whether it
 worked, so this table can grow.
