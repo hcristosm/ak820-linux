@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+  <!-- ak820-linux logo: the AK820 Pro's corner, with the screen next to the up arrow. ak820.png is rendered from this -->
+  <rect width="160" height="160" rx="32" fill="#241a3d"/>
+  <g fill="#2a2e37">
+    <rect x="14" y="14" width="86" height="40" rx="6"/>
+    <rect x="106" y="14" width="40" height="40" rx="6"/>
+    <rect x="14" y="60" width="40" height="40" rx="6"/>
+    <rect x="60" y="60" width="40" height="40" rx="6"/>
+    <rect x="14" y="106" width="40" height="40" rx="6"/>
+    <rect x="60" y="106" width="40" height="40" rx="6"/>
+    <rect x="106" y="106" width="40" height="40" rx="6"/>
+  </g>
+  <g fill="#333844">
+    <rect x="18" y="17" width="78" height="31" rx="4"/>
+    <rect x="110" y="17" width="32" height="31" rx="4"/>
+    <rect x="18" y="63" width="32" height="31" rx="4"/>
+    <rect x="64" y="63" width="32" height="31" rx="4"/>
+    <rect x="18" y="109" width="32" height="31" rx="4"/>
+    <rect x="64" y="109" width="32" height="31" rx="4"/>
+    <rect x="110" y="109" width="32" height="31" rx="4"/>
+  </g>
+  <g stroke="#9aa0aa" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M80 86V72M74 78l6-6 6 6"/>
+    <path d="M42 125H26M32 119l-6 6 6 6"/>
+    <path d="M80 117v16M74 127l6 6 6-6"/>
+    <path d="M118 125h16M128 119l6 6-6 6"/>
+  </g>
+  <rect x="107" y="61" width="38" height="38" rx="4" fill="#0e2f38" stroke="#22d3ee" stroke-width="2.5"/>
+  <path d="M112 72h28M112 89h28" stroke="#22d3ee" stroke-width="2"/>
+  <rect x="116" y="77" width="22" height="6" rx="1.5" fill="#e6e6e6"/>
+</svg>
