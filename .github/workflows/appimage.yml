@@ -16,9 +16,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # Qt's xcb plugin needs these; PyInstaller bundles them for distros that don't have them
+      # Qt's xcb plugin needs the libxcb-* ones; PyInstaller bundles them for distros that don't have them.
+      # EGL/GL, libdrm and wayland stay on the host (every desktop has them); they're here for the selftest
       - run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0 libxcb-icccm4 libxcb-image0
           libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 libxkbcommon-x11-0
+          libegl1 libgl1 libdrm2 libwayland-client0 libwayland-cursor0 libwayland-egl1
       - run: ./appimage/build.sh
       - uses: actions/upload-artifact@v4
         with:
